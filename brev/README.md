@@ -32,6 +32,7 @@ Push this repo to GitHub first (public, or grant Brev access), then set `REPO_UR
 | **Runtime** | **VM Mode** (Ubuntu 22.04 + Docker + NVIDIA driver + CUDA) |
 | **Setup script** | paste the contents of `brev/setup.sh` |
 | **Launch parameter** | `LAB_SECTION` = `1`…`5` (or `all`) |
+| **Launch parameter (optional)** | `HF_TOKEN`: each deployer's own Hugging Face token. Not needed (all lab models are public) but avoids download rate limits. Setup saves it to `~/.cache/huggingface/token`. Never bake your own token into the Launchable. |
 | **Jupyter** | enabled (setup generates `gpu_lab.ipynb` next to every `gpu_lab.py`) |
 | **Secure links** | Section 4 only: `grafana` → port **3000**, `prometheus` → port **9090** |
 | **GPU** | from the table above |

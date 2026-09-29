@@ -11,6 +11,14 @@ TORCHRUN    := $(PY) -m torch.distributed.run --nnodes=1 --master_addr=127.0.0.1
 # Number of NVIDIA GPUs; falls back to 2 CPU processes (gloo) on a laptop.
 NGPU        ?= $(shell n=$$(nvidia-smi -L 2>/dev/null | wc -l | tr -d ' '); [ "$$n" -gt 0 ] && echo $$n || echo 2)
 
+# Hugging Face token (optional; all lab models are public). Accept a key exported as HUGGING_FACE.
+ifneq ($(HUGGING_FACE),)
+HF_TOKEN ?= $(HUGGING_FACE)
+endif
+ifneq ($(HF_TOKEN),)
+export HF_TOKEN
+endif
+
 # Local OpenAI-compatible LLM server (vLLM) used by the prompting / evaluation / guardrails labs.
 LLM_MODEL   ?= Qwen/Qwen2.5-1.5B-Instruct
 LLM_PORT    ?= 8008
@@ -62,7 +70,7 @@ doctor: ## Check GPU, driver, PyTorch and Docker
 	@docker info --format 'docker {{.ServerVersion}} runtimes: {{range $$k, $$v := .Runtimes}}{{$$k}} {{end}}' 2>/dev/null || echo "docker not available"
 
 llm-up: ## Start a vLLM OpenAI-compatible server on the GPU (port 8008)
-	docker run -d --rm --name genl-llm --gpus all --ipc=host -p $(LLM_PORT):8000 \
+	docker run -d --rm --name genl-llm --gpus all --ipc=host -p $(LLM_PORT):8000 -e HF_TOKEN \
 		-v $(HOME)/.cache/huggingface:/root/.cache/huggingface $(VLLM_IMAGE) \
 		--model $(LLM_MODEL) --dtype half --max-model-len 4096 --gpu-memory-utilization 0.45
 	@echo "waiting for $(LLM_MODEL) ..."; \

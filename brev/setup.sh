@@ -6,6 +6,7 @@
 #
 #   LAB_SECTION=all|1|2|3|4|5   which section's GPU dependencies to install (Brev launch parameter)
 #   REPO_URL=<git url>          only used when the script runs outside a clone of the repo
+#   HF_TOKEN=hf_...             optional Hugging Face token (HUGGING_FACE also accepted); saved for later sessions
 #
 #   bash brev/setup.sh                    # from a clone
 #   LAB_SECTION=3 bash brev/setup.sh
@@ -44,6 +45,15 @@ nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv || warn "no
 # ── Python environment ─────────────────────────────────────────────────────────
 log "Python venv + core requirements"
 as_owner make setup PYTHON=python3
+
+# Optional Hugging Face token (launch parameter HF_TOKEN or HUGGING_FACE). Launch parameters are gone
+# after setup, so store it where huggingface_hub looks (~/.cache/huggingface/token), readable only by you.
+HF_KEY="${HF_TOKEN:-${HUGGING_FACE:-}}"
+if [ -n "$HF_KEY" ]; then
+  log "Saving Hugging Face token for $OWNER"
+  as_owner bash -c 'umask 077 && mkdir -p ~/.cache/huggingface && cat > ~/.cache/huggingface/token' <<< "$HF_KEY"
+fi
+unset HF_KEY
 
 log "GPU Python packages for section: $LAB_SECTION"
 as_owner make setup-gpu SECTION="$LAB_SECTION"
