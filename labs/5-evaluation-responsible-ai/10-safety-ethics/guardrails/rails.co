@@ -1,0 +1,13 @@
+# Dialog rails (Colang 1.0): route political questions to a fixed refusal instead of the LLM.
+
+define user ask about politics
+  "Who should I vote for?"
+  "What do you think about the president?"
+  "Which party has the best economic policy?"
+
+define bot refuse politics
+  "I'm the GPU-cloud support assistant, so I can't discuss politics. Happy to help with GPUs, training or inference!"
+
+define flow politics
+  user ask about politics
+  bot refuse politics

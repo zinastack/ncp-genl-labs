@@ -1,0 +1,6 @@
+# Section 3 GPU extras (Nsight Systems CLI is installed by brev/setup.sh, not pip)
+transformers>=4.44,<5
+accelerate>=0.33
+bitsandbytes>=0.43; sys_platform == "linux"
+tensorboard>=2.16
+jupytext>=1.16

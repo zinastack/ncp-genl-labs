@@ -1,0 +1,9 @@
+# Section 2 GPU extras
+transformers>=4.44,<5
+accelerate>=0.33
+peft>=0.12
+bitsandbytes>=0.43; sys_platform == "linux"
+datasets>=2.20
+sentence-transformers>=3.0
+tokenizers>=0.19
+jupytext>=1.16

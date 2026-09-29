@@ -1,0 +1,232 @@
+domain = "Evaluation"
+code = "09"
+weight = 7
+
+[[questions]]
+id = "09-01"
+topic = "Scalable evaluation pipeline"
+question = """
+A research group wants to compare multiple large language models using a scalable evaluation
+pipeline that integrates NVIDIA Triton for inference and Weights & Biases for experiment tracking.
+The team must design a system that can support quantitative benchmarking, qualitative review, and
+continuous error analysis. Which design choices are MOST aligned with best practices for scalable,
+trustworthy LLM assessment? (Select TWO.)
+"""
+options = [
+  "Serve all candidate models behind Triton with identical, versioned prompts, decoding parameters and held-out datasets, and log every run's config, metrics and sample outputs to W&B for side-by-side comparison",
+  "Combine automatic metrics with structured qualitative review (rubric-based LLM-as-judge calibrated against human ratings), and log per-example results so failures can be sliced and categorised over time",
+  "Evaluate each model on whichever prompt format gives it the highest score, since models differ",
+  "Use only training loss curves from W&B to rank the models",
+  "Run evaluation manually in notebooks and paste the final numbers into a spreadsheet",
+]
+answer = ["A", "B"]
+explanation = """
+Trustworthy comparisons need controlled conditions: the same data, prompts and decoding
+settings, reproducible and tracked runs, and scalable batched inference through Triton. Qualitative
+review at scale (a calibrated judge plus human spot checks) and per-example logging enable
+continuous error analysis. Tuning prompts per model biases the comparison. Training loss doesn't
+measure downstream quality. Manual notebooks aren't scalable or reproducible.
+"""
+
+[[questions]]
+id = "09-02"
+topic = "Choosing metrics"
+question = "Which pairing of task and primary automatic metric is most appropriate?"
+options = [
+  "Abstractive summarisation: ROUGE-L, supplemented by a faithfulness check",
+  "Machine translation: perplexity of the reference translation",
+  "Code generation: BLEU against a reference solution",
+  "Multi-class intent classification: ROUGE-1",
+]
+answer = ["A"]
+explanation = """
+ROUGE's recall-oriented overlap is the standard summarisation metric, but it misses
+hallucinations, so a faithfulness or groundedness check is added. Translation uses BLEU or
+chrF/COMET. Code is judged by execution (pass@k), because many correct programs differ
+textually. Classification uses accuracy or F1.
+"""
+
+[[questions]]
+id = "09-03"
+topic = "Statistical significance"
+question = """
+Model B scores 71.4% versus Model A's 70.9% on a 400-question internal benchmark. Before
+announcing B as better, what should you do?
+"""
+options = [
+  "Compute a paired bootstrap confidence interval (or a paired significance test) on per-question results; if the interval includes zero, the difference isn't reliable",
+  "Nothing; a higher score is always better",
+  "Re-run B with a higher temperature to see if it improves further",
+  "Report only B's score",
+]
+answer = ["A"]
+explanation = """
+A 0.5-point difference on 400 items (about 2 questions) is well within sampling noise. Paired
+resampling on the same items gives a confidence interval for the difference. Changing decoding
+for one model biases the comparison. Report both scores with uncertainty.
+"""
+
+[[questions]]
+id = "09-04"
+topic = "LLM-as-judge bias"
+question = "Which practices reduce known biases when using an LLM as a judge for pairwise comparisons? (Select TWO.)"
+options = [
+  "Evaluate each pair twice with the answer order swapped, and count only consistent verdicts",
+  "Use a rubric with anchored criteria, and check the judge's agreement with human ratings (for example Cohen's κ) on a sample",
+  "Always use the same model family as the judge and as the model being evaluated",
+  "Prefer the longer answer when the judge is uncertain",
+  "Hide the rubric from the judge to avoid overfitting",
+]
+answer = ["A", "B"]
+explanation = """
+LLM judges show position bias (fixed by swapping order), verbosity bias and self-preference.
+Clear rubrics and calibration against human judgements make scores meaningful. Using the same
+family invites self-preference. Favouring length amplifies verbosity bias. A hidden rubric makes
+scores inconsistent.
+"""
+
+[[questions]]
+id = "09-05"
+topic = "Perplexity"
+question = "Why can't you compare perplexity directly between Llama-3 (128k vocabulary) and Llama-2 (32k vocabulary) on the same text?"
+options = [
+  "Perplexity is normalised per token, and the tokenizers split the same text into different numbers and kinds of tokens",
+  "Perplexity is only defined for encoder models",
+  "Perplexity needs labelled data",
+  "Larger vocabularies always give lower perplexity",
+]
+answer = ["A"]
+explanation = """
+Perplexity is exp(average negative log-likelihood per token). Different tokenizers produce
+different token counts and granularity, so per-token values aren't comparable. Use bits per byte
+or per character, or compare task metrics instead. Perplexity is defined for autoregressive LMs
+and needs no labels.
+"""
+
+[[questions]]
+id = "09-06"
+topic = "RAG evaluation"
+question = """
+A RAG assistant gives wrong answers on 20% of test questions. How should you evaluate it to find
+the failing component?
+"""
+options = [
+  "Measure retrieval separately (recall@k / MRR against gold passages) and generation separately (faithfulness to the retrieved context, answer correctness), then categorise each failure",
+  "Measure only final answer accuracy",
+  "Measure only embedding-model perplexity",
+  "Increase top-k until accuracy improves",
+]
+answer = ["A"]
+explanation = """
+Component-level metrics show whether the right passage was never retrieved (a retrieval or
+chunking problem) or was retrieved but ignored or contradicted (a generation or prompting
+problem). End-to-end accuracy alone can't tell them apart. Blindly raising top-k can hurt
+precision and add noise to the context.
+"""
+
+[[questions]]
+id = "09-07"
+topic = "pass@k"
+question = """
+You sample n=20 solutions per HumanEval problem at temperature 0.8, and 3 pass the unit tests for
+a given problem. What is the unbiased estimate of pass@1 for that problem?
+"""
+options = ["0.15", "0.30", "1.0", "0.05"]
+answer = ["A"]
+explanation = """
+pass@k = 1 − C(n−c, k)/C(n, k). For k=1 this is c/n = 3/20 = 0.15. Averaging over problems gives
+the benchmark score. For larger k the combinatorial form avoids the high variance of estimating
+from exactly k samples.
+"""
+
+[[questions]]
+id = "09-08"
+topic = "Error analysis"
+question = """
+Overall accuracy of a support classifier is 92%, but complaints come mostly from non-English
+users. What is the most useful next step?
+"""
+options = [
+  "Slice the evaluation by language (and other attributes), compare per-slice accuracy and confusion matrices, and examine sampled errors from the worst slices",
+  "Report the 92% since it exceeds the target",
+  "Retrain on the same data with more epochs",
+  "Remove non-English examples from the test set",
+]
+answer = ["A"]
+explanation = """
+Aggregate metrics hide weak subgroups. Slicing exposes where the model fails, and qualitative
+review of errors shows why (tokenisation, missing training data, label noise), which guides a fix
+such as targeted data collection. Removing the hard cases hides the problem.
+"""
+
+[[questions]]
+id = "09-09"
+topic = "Inter-rater agreement"
+question = """
+Two annotators label 1,000 outputs as safe or unsafe and agree 94% of the time, but 95% of outputs
+are safe. What should you report to judge annotation reliability?
+"""
+options = [
+  "Cohen's κ, which corrects agreement for chance; high raw agreement can coincide with low κ when one class dominates",
+  "Only the 94% raw agreement",
+  "Macro-F1 of annotator A",
+  "Perplexity of the annotations",
+]
+answer = ["A"]
+explanation = """
+With 95% of outputs safe, two raters who label almost everything "safe" agree about 90% of the
+time by chance. κ = (p_o − p_e)/(1 − p_e) measures agreement beyond chance, and it can be low here
+even with 94% raw agreement. This shows whether the rare "unsafe" labels are reliable.
+"""
+
+[[questions]]
+id = "09-10"
+topic = "Benchmark selection"
+question = "Which benchmark primarily measures multi-step grade-school mathematical reasoning?"
+options = ["GSM8K", "HellaSwag", "TruthfulQA", "HumanEval"]
+answer = ["A"]
+explanation = """
+GSM8K has about 8.5k grade-school word problems that need multi-step arithmetic reasoning, and
+it is often used to test chain-of-thought. HellaSwag tests commonsense sentence completion,
+TruthfulQA tests resistance to common misconceptions, and HumanEval tests Python code generation.
+"""
+
+[[questions]]
+id = "09-11"
+topic = "Continuous evaluation"
+question = """
+Prompt templates and model versions change weekly. How do you catch quality regressions before
+they reach users?
+"""
+options = [
+  "Maintain a versioned regression suite (golden set, adversarial and safety cases) that runs automatically in CI on every model or prompt change, with pass/fail thresholds that gate deployment",
+  "Rely on user complaints",
+  "Evaluate once at initial launch",
+  "Test only the model weights, not the prompts",
+]
+answer = ["A"]
+explanation = """
+Treat evaluation like software tests. Automated suites run on every change and block releases
+that fall below thresholds. Prompts and templates change behaviour as much as weights do, so they
+belong in the suite. Waiting for complaints means users find the regressions.
+"""
+
+[[questions]]
+id = "09-12"
+topic = "Retrieval metrics"
+question = """
+A reranker's goal is to put the single most relevant passage at the top. Which metric reflects
+this directly?
+"""
+options = [
+  "Mean reciprocal rank (MRR), or nDCG@k with graded relevance",
+  "Recall@100",
+  "BLEU",
+  "Perplexity",
+]
+answer = ["A"]
+explanation = """
+MRR rewards placing the first relevant item near rank 1, and nDCG weighs graded relevance by
+position. Both are position-sensitive, which is what reranking changes. Recall@100 barely moves
+when items are reordered within the top 100. BLEU and perplexity aren't ranking metrics.
+"""

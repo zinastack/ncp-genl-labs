@@ -1,0 +1,317 @@
+domain = "Fine-Tuning"
+code = "04"
+weight = 13
+
+[[questions]]
+id = "04-01"
+topic = "LoRA initialisation"
+question = "Why is the LoRA B matrix initialised to zeros while A is initialised randomly?"
+options = [
+  "So the low-rank update BA is zero at the start and the adapted model exactly matches the pre-trained model, while gradients can still flow to B",
+  "To make the adapter weights sparse for faster inference",
+  "Because A and B are merged into the base weights before training starts",
+  "To prevent the base model's weights from being updated",
+]
+answer = ["A"]
+explanation = """
+With B = 0 the product BA is zero, so fine-tuning starts exactly from the base model's
+behaviour. Because A is random, the gradient with respect to B is non-zero and learning starts
+immediately. If both were zero, neither would receive a gradient. Freezing the base weights is
+a separate step (requires_grad = False). Merging happens after training.
+"""
+
+[[questions]]
+id = "04-02"
+topic = "LoRA parameter count"
+question = """
+You apply LoRA with rank r=16 to the q_proj and v_proj matrices (each 4096×4096) in all 32 layers
+of a 7B model. Roughly how many trainable parameters is that?
+"""
+options = ["About 8.4 million", "About 134 million", "About 1 million", "About 7 billion"]
+answer = ["A"]
+explanation = """
+Each adapted matrix adds r·(d_in + d_out) = 16 × 8192 = 131,072 parameters. That's 2 matrices ×
+32 layers = 64 matrices, so 64 × 131,072 ≈ 8.39M, about 0.12% of 7B. That tiny fraction is why
+LoRA's optimizer state and checkpoints are so small.
+"""
+
+[[questions]]
+id = "04-03"
+topic = "QLoRA"
+question = """
+A team must fine-tune a 65B model on a single 48 GB GPU. Which approach makes this feasible, and
+why?
+"""
+options = [
+  "QLoRA: store the frozen base model in 4-bit NF4 (about 33 GB) and train bf16 LoRA adapters, with paged optimizers absorbing memory spikes",
+  "Full fine-tuning in fp16 with gradient checkpointing",
+  "LoRA with the base model in fp32 to avoid precision loss",
+  "Prompt engineering with 100 few-shot examples",
+]
+answer = ["A"]
+explanation = """
+65B parameters at 4 bits is about 33 GB, which leaves room for adapters, activations and
+optimizer state for the adapters only. Full fine-tuning needs roughly 16 bytes per parameter
+(over 1 TB). fp32 weights alone would be 260 GB. Prompting isn't fine-tuning. QLoRA saves memory
+at the cost of some dequantisation overhead per step.
+"""
+
+[[questions]]
+id = "04-04"
+topic = "Loss masking"
+question = """
+After SFT on a chat dataset, the model sometimes generates text that looks like the next user
+question instead of answering. Which data-collation mistake most likely caused this?
+"""
+options = [
+  "The loss was computed on all tokens, including user/prompt tokens, instead of masking them with ignore_index (-100)",
+  "The learning rate was too low",
+  "The EOS token was masked in the labels",
+  "The dataset was shuffled",
+]
+answer = ["A"]
+explanation = """
+If prompt tokens contribute to the loss, the model is also trained to produce user turns.
+Standard SFT sets prompt labels to -100 so only assistant tokens are learned. Masking EOS would
+cause a different failure: the model never learns to stop and rambles. A low learning rate
+under-fits but doesn't teach the model to write user turns.
+"""
+
+[[questions]]
+id = "04-05"
+topic = "Choosing a method"
+question = """
+A semiconductor company wants its LLM to understand proprietary chip-design terminology found in
+10 billion tokens of internal documents, then follow engineering Q&A instructions. Which
+sequence is most appropriate?
+"""
+options = [
+  "Domain-adaptive continued pre-training on the internal corpus, then supervised fine-tuning on domain instruction data",
+  "SFT only, on 500 Q&A pairs",
+  "DPO on the raw documents",
+  "Prompt engineering with the glossary pasted into every prompt",
+]
+answer = ["A"]
+explanation = """
+Large unlabelled domain corpora teach vocabulary and knowledge through continued pre-training
+(DAPT), which is what NVIDIA's ChipNeMo did. SFT then teaches instruction following on that
+domain. A few hundred SFT examples can't inject billions of tokens of knowledge. DPO needs
+preference pairs, not raw text. A pasted glossary helps a little but doesn't scale.
+"""
+
+[[questions]]
+id = "04-06"
+topic = "DPO vs RLHF"
+question = "What is the main practical advantage of DPO over PPO-based RLHF?"
+options = [
+  "DPO optimises the policy directly from preference pairs with a classification-style loss, with no separate reward model and no RL sampling loop",
+  "DPO doesn't need preference data",
+  "DPO updates only the embedding layer",
+  "DPO removes the need for a reference model",
+]
+answer = ["A"]
+explanation = """
+DPO reparameterises the RLHF objective, so the optimal policy can be trained with a simple
+logistic loss on chosen versus rejected log-prob margins. That makes it simpler, more stable and
+cheaper than training a reward model and running PPO. It still needs preference pairs and a
+frozen reference model; β controls the implicit KL constraint.
+"""
+
+[[questions]]
+id = "04-07"
+topic = "Catastrophic forgetting"
+question = """
+After full fine-tuning on a narrow customer-service dataset for 10 epochs, the model loses
+general reasoning ability. Which changes reduce this? (Select TWO.)
+"""
+options = [
+  "Use a PEFT method such as LoRA so the base weights stay frozen",
+  "Mix general instruction data into the fine-tuning set and train fewer epochs",
+  "Increase the learning rate so training converges faster",
+  "Remove the validation set to use more data",
+  "Train for more epochs so the model fully adapts",
+]
+answer = ["A", "B"]
+explanation = """
+Freezing the base weights and training a low-rank update limits how far the model moves from
+its general abilities. Replaying general data and training for fewer epochs does the same. A
+higher learning rate and more epochs increase drift. Without a validation set you can't detect
+overfitting.
+"""
+
+[[questions]]
+id = "04-08"
+topic = "Multi-LoRA serving"
+question = """
+A SaaS platform needs 40 customer-specific variants of the same 8B base model with isolated
+behaviour. Which approach minimises GPU memory while serving all of them?
+"""
+options = [
+  "Train one LoRA adapter per customer and serve them on one shared base model with dynamic adapter selection per request (multi-LoRA in NIM or TensorRT-LLM)",
+  "Fully fine-tune 40 copies and deploy each on its own GPU",
+  "Merge all 40 adapters into one set of weights",
+  "Use one model and add the customer's name to the prompt",
+]
+answer = ["A"]
+explanation = """
+Adapters are tiny (MBs), so one resident base model can serve many adapters, chosen per request
+and batched together. NIM and TensorRT-LLM support this. Forty full copies multiply memory 40×.
+Merging all adapters mixes their behaviours and loses isolation. A name in the prompt doesn't give
+customer-specific learned behaviour.
+"""
+
+[[questions]]
+id = "04-09"
+topic = "LoRA hyperparameters"
+question = """
+LoRA fine-tuning with r=8 on attention projections only under-fits a complex code-generation
+task. Which adjustments most likely increase adapter capacity? (Select TWO.)
+"""
+options = [
+  "Increase the rank (for example to 32 or 64) and adjust alpha accordingly",
+  "Also target the MLP projections (gate_proj, up_proj, down_proj)",
+  "Decrease the rank to 2",
+  "Freeze lora_A as well as the base weights",
+  "Switch to prompt tuning with 5 virtual tokens",
+]
+answer = ["A", "B"]
+explanation = """
+Rank sets the dimension of the update subspace, and adding the MLP matrices, which hold about
+two thirds of the parameters, gives the adapter more places to change behaviour. A lower rank or
+a frozen A reduces capacity. Five virtual tokens of prompt tuning has far less capacity than LoRA.
+"""
+
+[[questions]]
+id = "04-10"
+topic = "Merging adapters"
+question = "What is the effect of merging a trained LoRA adapter into the base weights before deployment?"
+options = [
+  "Inference latency matches the base model because W' = W + (α/r)BA is a single dense matrix, but you can no longer hot-swap adapters on that copy",
+  "The model becomes smaller than the base model",
+  "Accuracy increases compared with the unmerged adapter",
+  "The model must be retrained after merging",
+]
+answer = ["A"]
+explanation = """
+Merging folds the low-rank update into W, which removes the extra adapter matmuls. The output is
+mathematically identical (up to precision) and the size equals the base model. The trade-off is
+flexibility: a merged copy serves one adapter. Unmerged adapters allow per-request switching.
+"""
+
+[[questions]]
+id = "04-11"
+topic = "Learning rates"
+question = "Which learning rates are typical starting points for LoRA versus full fine-tuning of a 7B LLM?"
+options = [
+  "LoRA about 1e-4 to 2e-4; full fine-tuning about 1e-5 to 2e-5",
+  "LoRA about 1e-6; full fine-tuning about 1e-3",
+  "Both about 1e-2",
+  "LoRA about 1.0; full fine-tuning about 0.1",
+]
+answer = ["A"]
+explanation = """
+The adapter starts at zero and is small, so LoRA tolerates and needs a higher learning rate,
+roughly 10× that of full fine-tuning. Full fine-tuning at high rates quickly destroys pre-trained
+knowledge. The other values are too high for LLMs or inverted.
+"""
+
+[[questions]]
+id = "04-12"
+topic = "Task-specific adaptation"
+question = """
+You need a low-latency classifier that routes support tickets into 12 fixed categories, with
+20k labelled examples. Which approach usually gives the best cost/accuracy trade-off?
+"""
+options = [
+  "Fine-tune a small encoder (for example DeBERTa or BERT) with a classification head",
+  "Prompt a 70B generative model zero-shot for each ticket",
+  "Fully fine-tune a 70B model to generate the category name",
+  "Train a new tokenizer on the tickets",
+]
+answer = ["A"]
+explanation = """
+For fixed-label classification with plenty of labels, a fine-tuned encoder with a softmax head
+is accurate and far cheaper and faster at inference than a large generative model. A 70B model
+costs much more per request, and full fine-tuning one is excessive. A new tokenizer doesn't solve
+the task.
+"""
+
+[[questions]]
+id = "04-13"
+topic = "P-tuning"
+question = "In NVIDIA NeMo, what does p-tuning train?"
+options = [
+  "A small prompt encoder (LSTM/MLP) that produces continuous virtual-token embeddings prepended to the input, while the LLM stays frozen",
+  "All the LLM's attention weights",
+  "A reward model for RLHF",
+  "A new tokenizer vocabulary",
+]
+answer = ["A"]
+explanation = """
+P-tuning is a PEFT method. A small prompt encoder generates soft prompt embeddings (virtual
+tokens) that are optimised by gradient descent. After training, the virtual tokens can be cached
+and the encoder discarded. The base model isn't changed, and it has nothing to do with reward
+models or tokenizers.
+"""
+
+[[questions]]
+id = "04-14"
+topic = "Evaluation after fine-tuning"
+question = """
+After LoRA fine-tuning a model for insurance claims summarisation, what should the evaluation
+plan include? (Select TWO.)
+"""
+options = [
+  "Task metrics on a held-out, deduplicated test set (for example ROUGE and human or LLM-judge faithfulness ratings)",
+  "Regression checks on general benchmarks and safety tests to detect forgetting and alignment loss",
+  "Training loss only, since it measures generalisation",
+  "Evaluation on the training examples to confirm memorisation",
+  "Only the model's perplexity on Wikipedia",
+]
+answer = ["A", "B"]
+explanation = """
+A sound plan measures the target task on unseen data, including faithfulness for summaries, and
+checks that fine-tuning didn't degrade general capabilities or safety behaviour. Training loss
+and scores on training examples measure fit, not generalisation. Wikipedia perplexity alone
+doesn't reflect task quality.
+"""
+
+[[questions]]
+id = "04-15"
+topic = "SFT data size"
+question = """
+A team has 800 high-quality, diverse instruction–response pairs written by experts for a
+specific writing style. Which statement is most accurate?
+"""
+options = [
+  "A small curated set can be enough to teach format and style through SFT or LoRA, because quality and diversity matter more than volume for alignment-style fine-tuning",
+  "SFT needs at least 1 million examples to have any effect",
+  "The pairs are useful only for continued pre-training",
+  "The pairs should be augmented by duplicating each example 100 times",
+]
+answer = ["A"]
+explanation = """
+Work such as LIMA (about 1k curated examples) showed that style and format alignment needs
+relatively little high-quality data, because knowledge comes from pre-training. Duplicating
+examples causes overfitting and memorisation. Continued pre-training uses raw text, not
+instruction pairs.
+"""
+
+[[questions]]
+id = "04-16"
+topic = "RLHF components"
+question = "Which components are needed for classic PPO-based RLHF? (Select TWO.)"
+options = [
+  "A reward model trained on human preference comparisons",
+  "A frozen reference (SFT) model for a KL penalty that keeps the policy from drifting",
+  "A new tokenizer trained on the preference data",
+  "A retrieval index of the training corpus",
+  "Removal of the value/critic network to save memory",
+]
+answer = ["A", "B"]
+explanation = """
+PPO-RLHF uses the policy, a value (critic) network, a reward model and a reference model. The
+reward model scores generations. The KL penalty to the reference model prevents reward hacking
+and loss of language quality. Tokenizers and retrieval indexes aren't part of it. PPO needs the
+critic. GRPO-style methods drop it, but that isn't classic PPO.
+"""

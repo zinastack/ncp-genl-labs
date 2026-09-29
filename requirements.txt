@@ -1,0 +1,7 @@
+# Core — everything in the labs runs on CPU (Apple Silicon / x86) with just these.
+numpy>=1.26
+torch>=2.2
+pytest>=8.0
+tomli>=2.0; python_version < "3.11"
+
+# GPU parts: each section has its own labs/<section>/requirements-gpu.txt (installed by `make setup-gpu`).

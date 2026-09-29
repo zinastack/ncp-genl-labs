@@ -1,0 +1,23 @@
+# NeMo Guardrails configuration for the GPU lab.
+# The main model is the local vLLM server started by `make llm-up` (OpenAI-compatible, port 8008).
+# To use NVIDIA-hosted NIMs instead:  engine: nim   model: meta/llama-3.1-8b-instruct  (needs NVIDIA_API_KEY)
+models:
+  - type: main
+    engine: vllm_openai
+    parameters:
+      openai_api_base: http://localhost:8008/v1
+      model_name: Qwen/Qwen2.5-1.5B-Instruct
+
+instructions:
+  - type: general
+    content: |
+      You are a support assistant for a GPU cloud platform. You answer questions about GPUs,
+      CUDA, model training and inference. You do not discuss politics or give medical advice.
+
+rails:
+  input:
+    flows:
+      - self check input        # LLM-as-classifier on the user message (see prompts.yml)
+  output:
+    flows:
+      - self check output       # LLM-as-classifier on the bot message

@@ -1,0 +1,8 @@
+# Section 5 GPU extras
+transformers>=4.44,<5
+accelerate>=0.33
+sentence-transformers>=3.0
+lm-eval>=0.4.3
+nemoguardrails>=0.11
+langchain-community>=0.2     # vllm_openai engine for NeMo Guardrails
+jupytext>=1.16

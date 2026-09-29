@@ -1,0 +1,4 @@
+# Section 1 GPU extras (installed by `make setup-gpu` / brev/setup.sh). Core deps are in ../../requirements.txt.
+transformers>=4.44,<5
+accelerate>=0.33
+jupytext>=1.16

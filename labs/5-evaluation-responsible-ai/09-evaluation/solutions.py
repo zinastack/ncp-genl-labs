@@ -1,0 +1,134 @@
+"""Lab 09 — reference solutions."""
+
+import math
+import re
+import string
+from collections import Counter, defaultdict
+
+import numpy as np
+
+
+def perplexity(token_logprobs):
+    return math.exp(-sum(token_logprobs) / len(token_logprobs))
+
+
+def normalize_answer(s):
+    s = s.lower()
+    s = "".join(ch for ch in s if ch not in set(string.punctuation))
+    s = re.sub(r"\b(a|an|the)\b", " ", s)
+    return " ".join(s.split())
+
+
+def exact_match(prediction, reference):
+    return float(normalize_answer(prediction) == normalize_answer(reference))
+
+
+def token_f1(prediction, reference):
+    p, r = normalize_answer(prediction).split(), normalize_answer(reference).split()
+    if not p or not r:
+        return float(p == r)
+    common = sum((Counter(p) & Counter(r)).values())
+    if common == 0:
+        return 0.0
+    precision, recall = common / len(p), common / len(r)
+    return 2 * precision * recall / (precision + recall)
+
+
+def _ngrams(tokens, n):
+    return Counter(tuple(tokens[i : i + n]) for i in range(len(tokens) - n + 1))
+
+
+def bleu(candidate, reference, max_n=4):
+    c, r = candidate.split(), reference.split()
+    log_ps = []
+    for n in range(1, max_n + 1):
+        cand, ref = _ngrams(c, n), _ngrams(r, n)
+        total = sum(cand.values())
+        matches = sum(min(cnt, ref[g]) for g, cnt in cand.items())
+        if total == 0 or matches == 0:
+            return 0.0
+        log_ps.append(math.log(matches / total))
+    bp = 1.0 if len(c) > len(r) else math.exp(1 - len(r) / len(c))
+    return bp * math.exp(sum(log_ps) / max_n)
+
+
+def _lcs(a, b):
+    dp = [0] * (len(b) + 1)
+    for x in a:
+        prev = 0
+        for j, y in enumerate(b, 1):
+            cur = dp[j]
+            dp[j] = prev + 1 if x == y else max(dp[j], dp[j - 1])
+            prev = cur
+    return dp[-1]
+
+
+def rouge_l(candidate, reference):
+    c, r = candidate.split(), reference.split()
+    lcs = _lcs(c, r)
+    if lcs == 0:
+        return 0.0
+    p, rec = lcs / len(c), lcs / len(r)
+    return 2 * p * rec / (p + rec)
+
+
+def precision_at_k(retrieved, relevant, k):
+    return sum(d in relevant for d in retrieved[:k]) / k
+
+
+def recall_at_k(retrieved, relevant, k):
+    return sum(d in relevant for d in retrieved[:k]) / len(relevant)
+
+
+def mrr(retrieved_lists, relevant_sets):
+    total = 0.0
+    for retrieved, relevant in zip(retrieved_lists, relevant_sets):
+        total += next((1 / i for i, d in enumerate(retrieved, 1) if d in relevant), 0.0)
+    return total / len(retrieved_lists)
+
+
+def ndcg_at_k(retrieved, relevance, k):
+    dcg = sum(relevance.get(d, 0) / math.log2(i + 1) for i, d in enumerate(retrieved[:k], 1))
+    ideal = sorted(relevance.values(), reverse=True)[:k]
+    idcg = sum(rel / math.log2(i + 1) for i, rel in enumerate(ideal, 1))
+    return dcg / idcg if idcg > 0 else 0.0
+
+
+def pass_at_k(n, c, k):
+    if n - c < k:
+        return 1.0
+    return 1.0 - math.comb(n - c, k) / math.comb(n, k)
+
+
+def paired_bootstrap(scores_a, scores_b, n_resamples=2000, seed=0):
+    diff = np.asarray(scores_b, float) - np.asarray(scores_a, float)
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, len(diff), size=(n_resamples, len(diff)))
+    means = diff[idx].mean(axis=1)
+    return float(diff.mean()), float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))
+
+
+def cohens_kappa(rater_a, rater_b):
+    n = len(rater_a)
+    p_o = sum(a == b for a, b in zip(rater_a, rater_b)) / n
+    ca, cb = Counter(rater_a), Counter(rater_b)
+    p_e = sum(ca[label] * cb[label] for label in set(ca) | set(cb)) / (n * n)
+    return 1.0 if p_e == 1 else (p_o - p_e) / (1 - p_e)
+
+
+def macro_f1(y_true, y_pred):
+    f1s = []
+    for c in sorted(set(y_true) | set(y_pred), key=str):
+        tp = sum(t == c and p == c for t, p in zip(y_true, y_pred))
+        fp = sum(t != c and p == c for t, p in zip(y_true, y_pred))
+        fn = sum(t == c and p != c for t, p in zip(y_true, y_pred))
+        f1s.append(0.0 if tp == 0 else 2 * tp / (2 * tp + fp + fn))
+    return sum(f1s) / len(f1s)
+
+
+def slice_accuracy(records, key):
+    groups = defaultdict(list)
+    for r in records:
+        groups[r[key]].append(bool(r["correct"]))
+    rows = [(g, sum(v) / len(v), len(v)) for g, v in groups.items()]
+    return sorted(rows, key=lambda row: (row[1], str(row[0])))

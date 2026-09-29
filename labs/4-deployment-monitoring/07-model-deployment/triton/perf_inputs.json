@@ -1,0 +1,4 @@
+{"data": [
+  {"TEXT": {"content": ["The new GPU cluster cut our training time in half."], "shape": [1]}},
+  {"TEXT": {"content": ["The model keeps timing out under load."], "shape": [1]}}
+]}

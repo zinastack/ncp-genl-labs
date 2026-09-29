@@ -1,0 +1,3 @@
+# Section 4 runs its services in Docker (Triton, DCGM exporter, Prometheus, Grafana; see docker-compose.yml).
+# The client, load generator and exercises only need the core requirements.
+jupytext>=1.16

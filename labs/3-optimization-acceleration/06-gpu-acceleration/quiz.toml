@@ -1,0 +1,351 @@
+domain = "GPU Acceleration & Optimization"
+code = "06"
+weight = 14
+
+[[questions]]
+id = "06-01"
+topic = "Choosing a distributed configuration"
+question = """
+A machine learning engineer is fine-tuning a large transformer model on a multi-node, multi-GPU
+setup. They notice that memory usage is high on each GPU and training is slower than expected.
+Which of the following distributed training configurations is best suited to optimize memory usage
+and performance at scale?
+"""
+options = [
+  "Combine tensor parallelism within each node (over NVLink) with sharded data parallelism (ZeRO/FSDP) across nodes, and use mixed precision",
+  "Plain DistributedDataParallel with a full model replica on every GPU and FP32 training",
+  "Tensor parallelism across all nodes over the inter-node network, with no data parallelism",
+  "Run on a single GPU with a very large gradient accumulation factor",
+]
+answer = ["A"]
+explanation = """
+Sharding optimizer states, gradients and parameters across data-parallel ranks removes the
+redundant copies that drive per-GPU memory. Tensor parallelism splits large layers, but its
+per-layer all-reduces need NVLink bandwidth, so it belongs inside a node. Mixed precision halves
+activation and weight memory and uses tensor cores. Plain DDP replicates everything. TP across
+slow inter-node links is communication-bound. A single GPU doesn't scale.
+"""
+
+[[questions]]
+id = "06-02"
+topic = "ZeRO stages"
+question = """
+A 7B model trains with DDP on 8 GPUs. Each GPU holds a full copy of the fp32 Adam states and runs
+out of memory. You want the smallest code change that shards only the optimizer states and
+gradients while keeping full parameters on each GPU. Which option fits?
+"""
+options = [
+  "ZeRO stage 2 (or FSDP SHARD_GRAD_OP)",
+  "ZeRO stage 3 (or FSDP FULL_SHARD)",
+  "Pipeline parallelism with 8 stages",
+  "Tensor parallelism of size 8",
+]
+answer = ["A"]
+explanation = """
+ZeRO-1 shards optimizer states, ZeRO-2 also shards gradients, and ZeRO-3 / FULL_SHARD also shards
+parameters, gathering them just in time at extra communication cost. The requirement (states and
+gradients sharded, parameters replicated) is exactly ZeRO-2 / SHARD_GRAD_OP. Pipeline and tensor
+parallelism need model code changes.
+"""
+
+[[questions]]
+id = "06-03"
+topic = "Where to put TP and PP"
+question = """
+You train a 175B model on 32 nodes of 8 H100 GPUs (NVLink inside the node, InfiniBand between
+nodes). Which layout follows best practice?
+"""
+options = [
+  "Tensor parallel = 8 inside each node, pipeline parallel across nodes, and data parallel over the remaining dimension",
+  "Tensor parallel = 32 across nodes, with no pipeline parallelism",
+  "Pipeline parallel = 8 inside the node and tensor parallel across nodes",
+  "Data parallel only, with a full replica on each GPU",
+]
+answer = ["A"]
+explanation = """
+Tensor parallelism communicates inside every layer, so it needs the highest-bandwidth link and
+stays within the NVLink domain (TP ≤ 8). Pipeline parallelism only sends activations between
+stages, point to point, which tolerates inter-node links. Data parallelism is outermost, and its
+gradient all-reduce overlaps with backward. A 175B model can't replicate on one GPU.
+"""
+
+[[questions]]
+id = "06-04"
+topic = "Pipeline bubble"
+question = """
+A pipeline-parallel job with 8 stages and 8 micro-batches per global batch shows about 47% idle
+time per GPU. What is the most effective way to reduce the bubble?
+"""
+options = [
+  "Increase the number of micro-batches per global batch (and/or use an interleaved schedule)",
+  "Increase the number of pipeline stages to 16",
+  "Reduce the number of micro-batches to 2",
+  "Switch from 1F1B to GPipe scheduling",
+]
+answer = ["A"]
+explanation = """
+The bubble fraction is (p−1)/(m+p−1): 7/15 ≈ 47% here. Raising m to 64 brings it to about 10%.
+Interleaved virtual stages divide the bubble by v. More stages or fewer micro-batches make it
+worse. 1F1B has the same bubble as GPipe but lower activation memory.
+"""
+
+[[questions]]
+id = "06-05"
+topic = "NCCL collectives"
+question = "Which NCCL collective does each technique mainly rely on? (Select TWO.)"
+options = [
+  "DDP gradient synchronisation uses all-reduce",
+  "Mixture-of-Experts token routing across expert-parallel GPUs uses all-to-all",
+  "FSDP forward passes use broadcast from rank 0 only",
+  "Pipeline parallelism uses all-reduce between stages",
+  "Tensor parallelism uses all-to-all for every matmul",
+]
+answer = ["A", "B"]
+explanation = """
+DDP all-reduces (averages) gradients. MoE dispatches tokens to the GPUs holding their experts and
+collects the results with all-to-all. FSDP all-gathers parameters and reduce-scatters gradients.
+Pipeline stages use point-to-point send and receive. Megatron tensor parallelism uses all-reduce
+(or reduce-scatter and all-gather with sequence parallelism).
+"""
+
+[[questions]]
+id = "06-06"
+topic = "Profiling workflow"
+question = """
+Multi-GPU training reaches only 35% GPU utilisation. Which tool gives the best first view of
+whether the problem is data loading, CPU overhead, or communication not overlapping with compute?
+"""
+options = [
+  "Nsight Systems, a system-wide timeline of CPU threads, CUDA kernels, NCCL and NVTX ranges",
+  "Nsight Compute, to analyse a single kernel's occupancy",
+  "nvidia-smi alone",
+  "Increasing the batch size until utilisation reaches 100%",
+]
+answer = ["A"]
+explanation = """
+Nsight Systems shows the whole timeline, so gaps between kernels, blocking data loaders, host
+synchronisations and exposed NCCL time are visible. Nsight Compute is the next step for
+optimising specific hot kernels. nvidia-smi reports utilisation without the reason. Changing batch
+size blindly can hide the real bottleneck.
+"""
+
+[[questions]]
+id = "06-07"
+topic = "Nsight Compute"
+question = """
+Nsight Systems shows one custom fused kernel takes 40% of step time. What should you use next to
+find out whether it is memory-bound or compute-bound and why?
+"""
+options = [
+  "Nsight Compute (ncu) with the full metric set for roofline, memory throughput, occupancy and warp stall reasons",
+  "Nsight Systems again, with a longer capture",
+  "The PyTorch DataLoader profiler",
+  "NCCL_DEBUG=INFO",
+]
+answer = ["A"]
+explanation = """
+Nsight Compute profiles individual kernels in depth: achieved versus peak memory bandwidth and
+FLOPs (roofline), occupancy, cache hit rates and stall reasons. Nsight Systems tells you where
+time goes, not why a kernel is slow. The other options target data loading or communication.
+"""
+
+[[questions]]
+id = "06-08"
+topic = "NVTX"
+question = "What is the purpose of adding NVTX ranges (for example torch.cuda.nvtx.range_push('forward')) to a training loop?"
+options = [
+  "To annotate code regions so they appear as labelled spans in Nsight Systems timelines, correlating framework phases with GPU kernels",
+  "To make kernels run faster by fusing them",
+  "To synchronise gradients across GPUs",
+  "To enable mixed precision automatically",
+]
+answer = ["A"]
+explanation = """
+NVTX adds lightweight markers that profilers display. They make it easy to see which kernels
+belong to forward, backward, optimizer or data loading. They have negligible overhead and don't
+change execution.
+"""
+
+[[questions]]
+id = "06-09"
+topic = "Scaling efficiency"
+question = """
+Going from 8 to 64 GPUs (1 to 8 nodes) with DDP only raises throughput 3×. Profiling shows long
+exposed all-reduce times. Which actions most likely help? (Select TWO.)
+"""
+options = [
+  "Verify the inter-node fabric is used properly (InfiniBand/RoCE with GPUDirect RDMA, NCCL not falling back to TCP sockets), for example with nccl-tests and NCCL_DEBUG=INFO",
+  "Increase the per-GPU batch or use gradient accumulation so each all-reduce is amortised over more compute, and make sure communication overlaps with backward (bucketing)",
+  "Disable mixed precision to make gradients larger",
+  "Use tensor parallelism across the 8 nodes",
+  "Set CUDA_VISIBLE_DEVICES to a single GPU on every node",
+]
+answer = ["A", "B"]
+explanation = """
+Poor multi-node scaling often comes from a misconfigured fabric, where NCCL silently uses TCP,
+or from communication that isn't hidden behind compute. Checking with nccl-tests and NCCL_DEBUG
+and raising the compute-to-communication ratio both help. FP32 gradients double the traffic.
+Cross-node TP is worse. Limiting each node to one GPU wastes hardware.
+"""
+
+[[questions]]
+id = "06-10"
+topic = "FSDP"
+question = "What does PyTorch FSDP with FULL_SHARD do during the forward pass of each wrapped module?"
+options = [
+  "It all-gathers that module's full parameters from all ranks just in time, computes, then frees the non-local shards",
+  "It keeps a full replica of all parameters on every rank for the whole step",
+  "It sends activations to the next pipeline stage",
+  "It splits each matmul column-wise across GPUs",
+]
+answer = ["A"]
+explanation = """
+FSDP stores 1/N of each parameter per rank. Before a wrapped unit runs, it all-gathers the full
+parameters, and afterwards it discards them, repeating in backward, where gradients are
+reduce-scattered. That is the ZeRO-3 memory pattern. Prefetching overlaps these gathers with
+compute. The other options describe DDP, pipeline and tensor parallelism.
+"""
+
+[[questions]]
+id = "06-11"
+topic = "MFU"
+question = """
+A 70B model trains at 250k tokens/s on 512 H100 GPUs (peak ~989 TFLOPS bf16 dense each). What is
+the approximate model FLOPs utilisation?
+"""
+options = ["About 21%", "About 5%", "About 50%", "About 90%"]
+answer = ["A"]
+explanation = """
+Training FLOPs per token ≈ 6N = 4.2e11. 4.2e11 × 2.5e5 = 1.05e17 FLOP/s achieved. Peak = 512 ×
+9.89e14 ≈ 5.06e17. MFU ≈ 0.21. Well-tuned large runs reach 35–55%, so this job has room to
+improve its parallel layout, overlap or kernels.
+"""
+
+[[questions]]
+id = "06-12"
+topic = "Roofline"
+question = "Which operations in LLM workloads are typically memory-bandwidth-bound on modern GPUs? (Select TWO.)"
+options = [
+  "Autoregressive decoding at small batch (matrix-vector products)",
+  "Element-wise operations such as activation functions, residual adds and normalisation",
+  "Large-batch prefill GEMMs with thousands of tokens",
+  "Large square matrix multiplications of size 8192³",
+  "FP8 GEMMs at large batch",
+]
+answer = ["A", "B"]
+explanation = """
+Low arithmetic intensity (few FLOPs per byte moved) is memory-bound. GEMVs in decode and
+element-wise kernels read and write a lot of data for little math, which is why kernel fusion and
+batching help. Large GEMMs have high intensity and are compute-bound on tensor cores.
+"""
+
+[[questions]]
+id = "06-13"
+topic = "torchrun"
+question = """
+You launch `torchrun --nproc_per_node=4 train.py` on a 4-GPU node, but all four processes allocate
+memory on GPU 0 and crash with out-of-memory errors. What is the most likely bug?
+"""
+options = [
+  "The script never calls torch.cuda.set_device(int(os.environ['LOCAL_RANK'])) or puts tensors on cuda:LOCAL_RANK",
+  "torchrun doesn't support more than 2 processes",
+  "The NCCL backend is only for CPUs",
+  "The model is too small for 4 GPUs",
+]
+answer = ["A"]
+explanation = """
+torchrun sets RANK, LOCAL_RANK and WORLD_SIZE, but each process must bind to its own device.
+Without that, "cuda" means cuda:0 for every process. NCCL is the GPU backend, and torchrun scales
+to any number of processes.
+"""
+
+[[questions]]
+id = "06-14"
+topic = "Sequence / context parallelism"
+question = """
+With tensor parallelism of 8, a 128k-context training job still runs out of memory because of
+activations in the attention layers. Which technique targets this?
+"""
+options = [
+  "Context parallelism (ring attention), which splits the sequence dimension across GPUs",
+  "Increasing the vocabulary size",
+  "Removing sequence packing",
+  "Switching the optimizer from Adam to SGD",
+]
+answer = ["A"]
+explanation = """
+Context parallelism shards the sequence across GPUs and passes K/V blocks around a ring, so
+activation memory for attention scales down with the CP size. Sequence parallelism (alongside TP)
+reduces activations for LayerNorm and dropout regions. The other options don't address
+long-sequence activations. Changing the optimizer affects optimizer-state memory, not activations.
+"""
+
+[[questions]]
+id = "06-15"
+topic = "DDP semantics"
+question = "In PyTorch DistributedDataParallel, what is synchronised across ranks every training step?"
+options = [
+  "Gradients, averaged by all-reduce during the backward pass, so every replica applies the same update",
+  "Model weights, broadcast from rank 0 after every optimizer step",
+  "Input batches, so every rank processes the same data",
+  "Activations, gathered at the end of the forward pass",
+]
+answer = ["A"]
+explanation = """
+DDP broadcasts weights once at construction. After that, identical gradients keep replicas in
+sync, so only gradients are all-reduced, in buckets overlapped with backward. Each rank processes a
+different data shard through DistributedSampler, and activations stay local.
+"""
+
+[[questions]]
+id = "06-16"
+topic = "Interconnect"
+question = "Why does tensor parallelism across GPUs connected only by PCIe often perform poorly?"
+options = [
+  "TP needs frequent all-reduces of activations in every layer, and PCIe bandwidth is an order of magnitude below NVLink, so communication dominates",
+  "PCIe GPUs don't support FP16",
+  "Tensor parallelism requires InfiniBand",
+  "PCIe limits the number of CUDA streams",
+]
+answer = ["A"]
+explanation = """
+Megatron TP communicates twice per transformer block in forward and again in backward, on the
+critical path. NVLink or NVSwitch gives hundreds of GB/s per GPU, versus about 32–64 GB/s for
+PCIe. On PCIe-only systems, data parallelism or pipeline parallelism usually scales better.
+"""
+
+[[questions]]
+id = "06-17"
+topic = "Mixed precision on Hopper"
+question = "What does NVIDIA Transformer Engine provide for training on H100 GPUs?"
+options = [
+  "FP8 matmuls with automatic per-tensor scaling (delayed scaling with amax history) in drop-in transformer layers",
+  "Automatic conversion of models to INT4 for training",
+  "A replacement for NCCL",
+  "A data-loading library",
+]
+answer = ["A"]
+explanation = """
+Transformer Engine provides FP8-capable Linear, LayerNorm and attention modules that manage
+scaling factors (E4M3 for forward, E5M2 for gradients) using amax history. On Hopper and newer
+GPUs this gives large speed-ups over BF16 while keeping accuracy. It isn't a quantization-to-INT4
+tool, a communication library or a data loader.
+"""
+
+[[questions]]
+id = "06-18"
+topic = "GPU monitoring"
+question = "Which tool is designed to collect GPU health and utilisation metrics (for example SM activity, memory, power, ECC errors) across a cluster for monitoring systems like Prometheus?"
+options = [
+  "NVIDIA DCGM with dcgm-exporter",
+  "Nsight Compute",
+  "nccl-tests",
+  "TensorRT",
+]
+answer = ["A"]
+explanation = """
+Data Center GPU Manager (DCGM) provides fleet-level telemetry, health checks and diagnostics.
+dcgm-exporter exposes them as Prometheus metrics for Grafana dashboards and alerting. Nsight
+Compute is a per-kernel profiler, nccl-tests benchmarks collectives, and TensorRT is an inference
+optimizer.
+"""

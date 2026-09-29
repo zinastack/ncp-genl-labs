@@ -1,0 +1,306 @@
+domain = "Model Deployment"
+code = "07"
+weight = 9
+
+[[questions]]
+id = "07-01"
+topic = "Triton dynamic batching"
+question = """
+You are deploying a text classification model on NVIDIA Triton Inference Server in a Docker
+container. Your SLO is P95 ≤ 20 ms end-to-end. The model's compute time is ~12 ms per request when
+run with batch size 8, and ~7 ms per request with batch size 1. Which Triton config.pbtxt dynamic
+batching block is the best starting point to meet the SLO while still gaining throughput from
+batching?
+"""
+options = [
+  """
+```
+dynamic_batching {
+  preferred_batch_size: [ 4, 8 ]
+  max_queue_delay_microseconds: 2000
+}
+```
+""",
+  """
+```
+dynamic_batching {
+  preferred_batch_size: [ 32 ]
+  max_queue_delay_microseconds: 50000
+}
+```
+""",
+  """
+```
+dynamic_batching {
+  max_queue_delay_microseconds: 20000
+}
+```
+""",
+  """
+```
+dynamic_batching { }
+max_batch_size: 0
+```
+""",
+]
+answer = ["A"]
+explanation = """
+The latency budget is roughly queue delay + compute + network. With batches of up to 8 (~12 ms),
+a 2 ms queue delay leaves headroom under 20 ms while still forming batches under load. A 50 ms or
+20 ms delay alone uses up or exceeds the SLO, and batch 32 isn't characterised and would be
+slower. max_batch_size 0 disables batching altogether. Confirm with perf_analyzer or Model
+Analyzer at the expected concurrency.
+"""
+
+[[questions]]
+id = "07-02"
+topic = "RAG relevance"
+question = """
+A team ships an NVIDIA-AI-Blueprints RAG service. Users report that answers sometimes cite
+irrelevant passages even though the corpus is correct. Telemetry shows high recall but low
+precision in top-k retrieval. Which adjustment is most appropriate first to improve answer
+relevance without re-ingesting the corpus?
+"""
+options = [
+  "Add a cross-encoder reranking stage (for example a NeMo Retriever reranking NIM) over a larger candidate set and pass only the top-reranked passages to the LLM",
+  "Re-chunk and re-embed the entire corpus with a different chunk size",
+  "Increase top-k from 5 to 50 passages sent to the LLM",
+  "Raise the LLM temperature to encourage it to ignore irrelevant context",
+]
+answer = ["A"]
+explanation = """
+High recall with low precision means the right passages are retrieved but ranked among noise. A
+reranker scores each (query, passage) pair jointly and reorders candidates, which raises
+precision in the final context. It is a query-time change, so nothing is re-ingested. Re-chunking
+requires re-ingestion. Sending 50 passages lowers precision further. Temperature doesn't fix
+retrieval.
+"""
+
+[[questions]]
+id = "07-03"
+topic = "Triton ports"
+question = "Which Triton Inference Server endpoint should Prometheus scrape to collect inference and GPU metrics?"
+options = [
+  "HTTP port 8002 at /metrics",
+  "HTTP port 8000 at /v2/models/<name>/infer",
+  "gRPC port 8001",
+  "Port 9090 on the Triton container",
+]
+answer = ["A"]
+explanation = """
+Triton serves HTTP/REST on 8000, gRPC on 8001, and Prometheus-format metrics on 8002/metrics.
+Those metrics include nv_inference_request_success, nv_inference_queue_duration_us and
+nv_gpu_utilization. 9090 is Prometheus's own default port.
+"""
+
+[[questions]]
+id = "07-04"
+topic = "Instance groups"
+question = """
+A small model on Triton uses only 30% of the GPU with one instance, even at high concurrency,
+because execution alternates with host-side pre/post-processing. Which config change most
+directly increases GPU utilisation?
+"""
+options = [
+  "Increase instance_group count (for example to 2–3 on the same GPU) so several executions overlap",
+  "Set max_batch_size to 0",
+  "Remove dynamic_batching",
+  "Change the model version policy to serve all versions",
+]
+answer = ["A"]
+explanation = """
+Multiple model instances let Triton run requests concurrently, overlapping one instance's
+host-side work and transfers with another's GPU compute. Disabling batching lowers throughput.
+The version policy controls which versions are served, not concurrency.
+"""
+
+[[questions]]
+id = "07-05"
+topic = "Kubernetes GPU scheduling"
+question = "How should a Kubernetes pod request one GPU so the scheduler places it on a GPU node?"
+options = [
+  "Set resources.limits: {nvidia.com/gpu: 1} (exposed by the NVIDIA device plugin / GPU Operator)",
+  "Set resources.limits: {cpu: 1000}",
+  "Add the environment variable CUDA_VISIBLE_DEVICES=0",
+  "Run the container with --privileged only",
+]
+answer = ["A"]
+explanation = """
+The NVIDIA device plugin, installed by the GPU Operator, advertises the extended resource
+nvidia.com/gpu. Requesting it in limits makes the scheduler pick a node with a free GPU and has
+the runtime mount it. Environment variables and privileged mode don't affect scheduling.
+"""
+
+[[questions]]
+id = "07-06"
+topic = "Autoscaling"
+question = """
+An HPA scales Triton pods on CPU utilisation, but during traffic spikes latency degrades while
+CPU stays at 20%. What is the better scaling signal? (Select TWO.)
+"""
+options = [
+  "Triton queue time per request (nv_inference_queue_duration_us / nv_inference_request_success) through Prometheus Adapter or KEDA",
+  "Requests in flight per pod, or GPU utilisation from DCGM",
+  "Pod memory usage on the host",
+  "The number of model versions loaded",
+  "Node disk I/O",
+]
+answer = ["A", "B"]
+explanation = """
+GPU inference saturates on the GPU and shows up as a growing queue. CPU stays low. Queue latency,
+in-flight requests or GPU utilisation track real load, and custom-metric autoscaling (Prometheus
+Adapter, KEDA) lets the HPA use them. Host memory, version count and disk I/O don't reflect
+inference saturation.
+"""
+
+[[questions]]
+id = "07-07"
+topic = "NIM"
+question = "Which statement best describes NVIDIA NIM for LLMs?"
+options = [
+  "Prebuilt, optimised inference microservice containers that expose an OpenAI-compatible API and choose an optimised engine (for example TensorRT-LLM) for the available GPU",
+  "A training framework for pre-training LLMs",
+  "A vector database for RAG",
+  "A Kubernetes replacement for GPU clusters",
+]
+answer = ["A"]
+explanation = """
+NIM packages a model, runtime and optimised engines into a container with standard APIs such as
+/v1/chat/completions. That makes deployment a docker run or Helm install. Training is NeMo's job.
+Vector databases (Milvus and others) and Kubernetes are separate components that NIM integrates
+with.
+"""
+
+[[questions]]
+id = "07-08"
+topic = "Startup probes"
+question = """
+LLM pods on Kubernetes are killed and restarted in a loop during deployment. Logs show the model
+was still loading (4 minutes) when the container was restarted. What is the fix?
+"""
+options = [
+  "Add a startupProbe with a long enough failureThreshold × periodSeconds (or a large initialDelaySeconds) so liveness checks start only after the model has loaded",
+  "Remove the readiness probe",
+  "Reduce the number of GPUs requested",
+  "Use the latest image tag",
+]
+answer = ["A"]
+explanation = """
+The liveness probe kills a container that is still loading weights. A startup probe holds off
+liveness and readiness checks until startup succeeds, which is the standard pattern for slow-loading
+models. Without a readiness probe, traffic goes to pods that aren't ready. The GPU count and the
+image tag don't affect load time.
+"""
+
+[[questions]]
+id = "07-09"
+topic = "Ensembles"
+question = """
+A pipeline does tokenisation (CPU), a TensorRT model (GPU) and post-processing (CPU). Each step is
+currently a separate microservice, which adds network latency. Which Triton feature keeps the
+pipeline inside one server?
+"""
+options = [
+  "A Triton ensemble model (or Business Logic Scripting in the Python backend) that chains the steps and passes tensors in memory",
+  "Sequence batching",
+  "Model version policies",
+  "Rate limiting",
+]
+answer = ["A"]
+explanation = """
+Ensembles define a DAG of models whose outputs feed other models' inputs inside Triton, with no
+extra serialisation or network hops. BLS allows custom control flow. Sequence batching is for
+stateful models, version policies choose served versions, and rate limiting controls execution
+priority.
+"""
+
+[[questions]]
+id = "07-10"
+topic = "Capacity planning"
+question = """
+A service receives 120 requests/s with an average latency of 0.5 s. Each replica handles up to 16
+concurrent requests efficiently. How many replicas are needed without headroom?
+"""
+options = ["4", "8", "2", "60"]
+answer = ["A"]
+explanation = """
+Little's law: in-flight requests = arrival rate × latency = 120 × 0.5 = 60. 60 / 16 = 3.75, which
+rounds up to 4 replicas. Production sizing adds headroom (for example 20–30%) for spikes and
+failures.
+"""
+
+[[questions]]
+id = "07-11"
+topic = "Containers"
+question = "Which practices are appropriate for containerised GPU inference in production? (Select TWO.)"
+options = [
+  "Pin exact image tags (for example nvcr.io/nvidia/tritonserver:24.12-py3) and build from NGC base images",
+  "Run containers with the NVIDIA Container Toolkit (--gpus or the Kubernetes device plugin) instead of installing drivers inside the image",
+  "Always use :latest so security patches are picked up automatically",
+  "Install the NVIDIA kernel driver inside every container image",
+  "Store model weights in the container's writable layer at runtime",
+]
+answer = ["A", "B"]
+explanation = """
+Pinned tags make deployments reproducible and allow controlled upgrades. NGC images are tested
+with the CUDA stack. The host driver is exposed to containers by the NVIDIA Container Toolkit, so
+images carry only user-space CUDA libraries. :latest makes rollbacks and audits unreliable.
+Writable-layer weights are lost on restart. Use baked-in images, volumes or a model cache.
+"""
+
+[[questions]]
+id = "07-12"
+topic = "Triton protocol"
+question = "Which HTTP request path does Triton use to run inference with the KServe v2 protocol?"
+options = [
+  "POST /v2/models/<model_name>/infer",
+  "POST /v1/chat/completions",
+  "GET /predict/<model_name>",
+  "POST /api/generate",
+]
+answer = ["A"]
+explanation = """
+Triton implements the KServe v2 inference protocol (/v2/models/<name>[/versions/<v>]/infer, plus
+/v2/health/ready and /v2/health/live). /v1/chat/completions is the OpenAI-style API used by NIM
+(and by Triton's OpenAI-compatible frontend). The other paths belong to other servers.
+"""
+
+[[questions]]
+id = "07-13"
+topic = "Model Analyzer"
+question = """
+You need to find the Triton configuration (max batch size, instance count, queue delay) that
+maximises throughput while keeping P99 latency under 50 ms. Which tool automates this search?
+"""
+options = [
+  "Triton Model Analyzer, which sweeps model configurations with perf_analyzer and reports the best ones under your constraints",
+  "Nsight Compute",
+  "NCCL tests",
+  "TensorBoard",
+]
+answer = ["A"]
+explanation = """
+Model Analyzer generates candidate configurations, measures them with perf_analyzer, and ranks
+them against objectives and constraints such as a latency budget or GPU memory. Nsight Compute
+profiles kernels, NCCL tests benchmark collectives, and TensorBoard visualises training.
+"""
+
+[[questions]]
+id = "07-14"
+topic = "Rolling updates"
+question = """
+You roll out a new model version on a Kubernetes Deployment with 3 GPU replicas and must never
+drop below 3 ready replicas. Which rollout settings achieve this?
+"""
+options = [
+  "strategy RollingUpdate with maxUnavailable: 0 and maxSurge: 1, plus a readiness probe that passes only when the model is loaded",
+  "strategy Recreate",
+  "maxUnavailable: 100%",
+  "Delete the Deployment and apply the new one",
+]
+answer = ["A"]
+explanation = """
+maxUnavailable 0 means an old pod is removed only after a new one is ready. maxSurge 1 allows one
+extra pod, which needs one spare GPU, during the rollout. Readiness gating makes sure "ready"
+means the model can serve. Recreate and deleting the Deployment cause downtime.
+"""

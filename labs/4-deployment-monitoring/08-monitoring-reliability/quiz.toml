@@ -1,0 +1,210 @@
+domain = "Production Monitoring & Reliability"
+code = "08"
+weight = 7
+
+[[questions]]
+id = "08-01"
+topic = "Latency metrics"
+question = """
+A dashboard shows average latency of 180 ms for an LLM API, well within the 500 ms target, yet
+users complain about slowness. Which metric change would best reveal the problem?
+"""
+options = [
+  "Track tail percentiles (P95/P99) computed from latency histograms, plus TTFT and inter-token latency for streaming",
+  "Report the median of daily averages",
+  "Track only the total requests per second",
+  "Average the P99 values reported by each replica",
+]
+answer = ["A"]
+explanation = """
+Averages hide the long tail that users feel. P95 and P99 expose it, and for LLMs TTFT and
+inter-token latency describe perceived responsiveness better than total time. Percentiles must be
+computed from aggregated histograms. Averaging per-replica P99s is statistically wrong.
+"""
+
+[[questions]]
+id = "08-02"
+topic = "Data drift"
+question = """
+The population stability index (PSI) of prompt-length and topic-embedding features between the
+training set and last week's traffic is 0.34. What does this indicate, and what is the
+appropriate response?
+"""
+options = [
+  "Significant input drift; trigger an evaluation on recent labelled samples and, if quality has dropped, retrain or fine-tune with recent data through the normal evaluation gates",
+  "No drift; PSI above 0.25 means the distributions are identical",
+  "The model is overfitting; immediately reduce its size",
+  "Only a monitoring bug; PSI can't be computed on text",
+]
+answer = ["A"]
+explanation = """
+PSI above 0.25 is conventionally significant drift (below 0.1 is stable, 0.1–0.25 is moderate).
+Drift is a trigger to investigate. Confirm the impact on quality with evaluation, then retrain
+with recent data and promote only after the same gates. PSI works on any binned feature,
+including embedding projections, lengths and topic distributions.
+"""
+
+[[questions]]
+id = "08-03"
+topic = "Rollout strategies"
+question = """
+You want to validate a new model version on real production traffic with zero impact on users
+before any exposure. Which strategy fits?
+"""
+options = [
+  "Shadow deployment: mirror live requests to the new model and log its outputs without returning them to users",
+  "Canary release to 10% of users",
+  "Blue-green switch of all traffic",
+  "Direct replacement during a maintenance window",
+]
+answer = ["A"]
+explanation = """
+Shadow (mirrored) traffic exercises the new model on real inputs for latency, errors and output
+comparison while users only ever see the current model's responses. Canary and blue-green
+expose some or all users. A direct replacement has no validation step.
+"""
+
+[[questions]]
+id = "08-04"
+topic = "Canary analysis"
+question = """
+A canary serving 5% of traffic shows P95 latency 35% higher and an error rate 4× the stable
+version's over the same time window. What should the automated rollout do?
+"""
+options = [
+  "Halt and roll back the canary automatically, and keep the logs and metrics for investigation",
+  "Promote it to 100% so the latency averages out",
+  "Increase the canary to 50% to collect more data",
+  "Ignore it, since a 5% sample is too small to matter",
+]
+answer = ["A"]
+explanation = """
+Canary analysis compares both versions over the same window against predefined thresholds.
+Clear regressions in latency and errors should trigger an automatic rollback. Expanding exposure
+or promoting would harm more users. A 5% slice of production traffic is usually enough to detect
+a fourfold error increase.
+"""
+
+[[questions]]
+id = "08-05"
+topic = "SLO burn rate"
+question = """
+Your SLO is 99.9% successful requests over 30 days. Which alerting approach best balances fast
+detection of serious incidents with few false pages?
+"""
+options = [
+  "Multi-window burn-rate alerts: page when both a short window (for example 5 min) and a longer window (for example 1 h) burn the error budget at ≥14.4×, and open a ticket for slower burns",
+  "Page whenever a single request fails",
+  "Page only when the monthly error budget is completely exhausted",
+  "Alert on CPU usage above 80%",
+]
+answer = ["A"]
+explanation = """
+Burn rate (error rate ÷ allowed error rate) ties alerts to user impact. Requiring both a short
+and a long window filters brief blips while catching sustained fast burns within minutes. Slow
+burns go to tickets. Per-request paging is noise. Waiting for full exhaustion is too late. CPU is
+a cause, not a symptom.
+"""
+
+[[questions]]
+id = "08-06"
+topic = "Triton metrics"
+question = """
+From Triton metrics, nv_inference_count increased by 12,000 and nv_inference_exec_count by 1,500
+over the last minute. What does this tell you?
+"""
+options = [
+  "Dynamic batching is forming batches of about 8 requests on average",
+  "1,500 requests failed",
+  "The GPU is 12.5% utilised",
+  "Queue time averages 8 ms",
+]
+answer = ["A"]
+explanation = """
+nv_inference_count counts inferences (batch items) and nv_inference_exec_count counts model
+executions (batches). Their ratio is the average executed batch size: 12,000 / 1,500 = 8. Failures
+are in nv_inference_request_failure, GPU utilisation is in nv_gpu_utilization or DCGM, and queue
+time is nv_inference_queue_duration_us divided by successful requests.
+"""
+
+[[questions]]
+id = "08-07"
+topic = "Automated retraining"
+question = "Which elements belong in a safe automated retraining pipeline for a production LLM? (Select TWO.)"
+options = [
+  "Triggers based on drift, monitored quality degradation, or accumulated new labelled data",
+  "Evaluation gates (task metrics, safety and regression suites) that a new version must pass before registry promotion and a canary rollout",
+  "Automatic deployment of every retrained model straight to 100% of traffic",
+  "Deleting previous model versions to save storage",
+  "Retraining every hour regardless of data or metrics",
+]
+answer = ["A", "B"]
+explanation = """
+Retraining should happen for a reason and never bypass evaluation. A new version must beat or
+match the incumbent on gated evaluations, then roll out progressively. Keeping previous versions
+enables rollback. Blind hourly retraining wastes compute and risks regressions.
+"""
+
+[[questions]]
+id = "08-08"
+topic = "Version management"
+question = """
+After deploying fine-tuned model v7, output quality drops. Investigation shows the weights are
+fine but the chat template and system prompt used in production differ from those used in
+evaluation. What practice would have prevented this?
+"""
+options = [
+  "Version and release the model artifact together with its tokenizer, prompt templates, generation parameters and guardrail configuration in the registry",
+  "Use a larger model",
+  "Monitor only GPU utilisation",
+  "Store models without version numbers to simplify deployment",
+]
+answer = ["A"]
+explanation = """
+An LLM's behaviour depends on the whole serving configuration, not just its weights. Treating
+prompts, templates, sampling parameters and guardrails as versioned artifacts with lineage keeps
+evaluation and production consistent and makes rollback exact.
+"""
+
+[[questions]]
+id = "08-09"
+topic = "GPU health"
+question = """
+One node in an inference cluster occasionally returns corrupted outputs and later crashes. DCGM
+reports non-zero XID errors and rising ECC error counts on one GPU. What is the correct operational
+response?
+"""
+options = [
+  "Cordon and drain the node, take the GPU out of service for diagnostics (for example dcgmi diag), and let the scheduler move workloads to healthy nodes",
+  "Increase the batch size on that node",
+  "Ignore it; ECC errors are always corrected",
+  "Restart the model server every hour",
+]
+answer = ["A"]
+explanation = """
+XID and ECC errors point to hardware or driver faults. The node must be removed from rotation
+(Kubernetes cordon and drain), and DCGM diagnostics run. Uncorrectable errors corrupt results,
+and restarts only hide the symptom.
+"""
+
+[[questions]]
+id = "08-10"
+topic = "Reliability patterns"
+question = """
+A downstream LLM endpoint sometimes becomes very slow, and your API's worker threads pile up
+waiting on it, taking the whole service down. Which patterns address this? (Select TWO.)
+"""
+options = [
+  "Client timeouts with bounded retries and exponential back-off with jitter",
+  "A circuit breaker that fails fast and serves a fallback (smaller model or cached answer) while the dependency is unhealthy",
+  "Unlimited retries on every failure",
+  "Removing all timeouts so requests eventually succeed",
+  "Scaling the API tier to 10× its current size",
+]
+answer = ["A", "B"]
+explanation = """
+Timeouts and bounded retries keep slow dependencies from exhausting resources, and jitter avoids
+synchronised retry storms. A circuit breaker stops calling a failing dependency and degrades
+gracefully. Unlimited retries and no timeouts amplify the outage. Scaling the API tier doesn't fix
+a slow dependency and can overload it further.
+"""

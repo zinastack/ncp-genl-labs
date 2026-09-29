@@ -1,0 +1,400 @@
+domain = "Model Optimization"
+code = "05"
+weight = 17
+
+[[questions]]
+id = "05-01"
+topic = "Training memory"
+question = """
+Approximately how much GPU memory do the weights, gradients and Adam optimizer states need for
+full mixed-precision fine-tuning of a 13B-parameter model, excluding activations?
+"""
+options = ["About 208 GB", "About 26 GB", "About 52 GB", "About 1 TB"]
+answer = ["A"]
+explanation = """
+Mixed-precision Adam uses about 16 bytes per parameter: 2 for bf16 weights, 2 for gradients, 4
+for fp32 master weights, and 4 each for Adam m and v. 13B × 16 B ≈ 208 GB, so full fine-tuning of
+a 13B model needs several 80 GB GPUs with sharding (ZeRO/FSDP), or PEFT. 26 GB is only the bf16
+weights.
+"""
+
+[[questions]]
+id = "05-02"
+topic = "BF16 vs FP16"
+question = "Why is BF16 generally preferred over FP16 for training LLMs on A100/H100 GPUs?"
+options = [
+  "BF16 has the same exponent range as FP32, so gradients rarely overflow or underflow and loss scaling isn't needed",
+  "BF16 has more mantissa bits than FP16, so it is more precise",
+  "BF16 uses half the memory of FP16",
+  "BF16 is the only format supported by tensor cores",
+]
+answer = ["A"]
+explanation = """
+BF16 keeps 8 exponent bits, like FP32, and gives up mantissa precision (7 bits versus FP16's 10).
+Its wide dynamic range avoids the overflow and underflow that make FP16 training need dynamic
+loss scaling. Both formats are 16 bits, and tensor cores support FP16, BF16, TF32, FP8 and INT8.
+"""
+
+[[questions]]
+id = "05-03"
+topic = "Loss scaling"
+question = """
+During FP16 mixed-precision training, the GradScaler repeatedly reports inf/NaN gradients and the
+loss scale keeps dropping. What does the scaler do on each overflow step?
+"""
+options = [
+  "It skips the optimizer step for that iteration and halves the loss scale",
+  "It applies the update anyway and doubles the loss scale",
+  "It converts the model permanently to FP32",
+  "It clips the gradients to 1.0 and continues with the same scale",
+]
+answer = ["A"]
+explanation = """
+Dynamic loss scaling multiplies the loss by a large factor so small gradients survive in FP16.
+If any gradient overflows, the step is skipped, so no corrupted update is applied, and the scale
+is reduced (typically halved). After a run of clean steps it grows again. Persistent overflows
+point to instability. Switching to BF16 or lowering the learning rate usually helps.
+"""
+
+[[questions]]
+id = "05-04"
+topic = "Gradient accumulation"
+question = """
+A model trains well with global batch 512, but only micro-batch 16 fits per GPU and you have 8 GPUs
+with data parallelism. How do you reproduce the original training dynamics?
+"""
+options = [
+  "Use gradient accumulation with 4 steps: 16 × 4 × 8 = 512",
+  "Use gradient accumulation with 32 steps",
+  "Keep batch 128 and multiply the learning rate by 4",
+  "Increase the micro-batch to 64 and enable FP32",
+]
+answer = ["A"]
+explanation = """
+Effective batch = micro-batch × accumulation steps × data-parallel replicas = 16 × 4 × 8 = 512.
+Accumulating gradients (loss divided by the number of steps) matches the large-batch gradient.
+Thirty-two steps would give 4096. Scaling the learning rate isn't equivalent. A micro-batch of 64
+doesn't fit, and FP32 uses more memory.
+"""
+
+[[questions]]
+id = "05-05"
+topic = "Activation checkpointing"
+question = """
+Training a 30-layer model at 8k sequence length runs out of memory because of activations.
+Weights and optimizer states fit comfortably. Which technique targets this directly, and what does
+it cost?
+"""
+options = [
+  "Activation (gradient) checkpointing: store only some activations and recompute the rest during backward, at roughly 20–35% extra compute",
+  "Quantize the weights to INT4; there's no cost",
+  "Increase the learning rate; there's no cost",
+  "Disable the KV cache during training",
+]
+answer = ["A"]
+explanation = """
+Activation memory grows with batch × sequence × hidden × layers. Checkpointing trades compute for
+memory by recomputing activations in the backward pass. Selective checkpointing, which recomputes
+only cheap but large parts such as attention, lowers the overhead. Weight quantization doesn't
+touch activations. The KV cache is an inference mechanism.
+"""
+
+[[questions]]
+id = "05-06"
+topic = "Decode bottleneck"
+question = """
+At batch size 1, token generation for a 70B FP16 model on an H100 is far below the GPU's peak
+FLOPs. What is the primary bottleneck?
+"""
+options = [
+  "Memory bandwidth: every decode step must read all ~140 GB of weights from HBM to produce one token",
+  "Tensor-core compute throughput",
+  "PCIe bandwidth from CPU to GPU",
+  "Tokenizer speed on the CPU",
+]
+answer = ["A"]
+explanation = """
+Decoding is a matrix-vector workload with very low arithmetic intensity. Throughput is bounded by
+HBM bandwidth ÷ bytes of weights: 3.35 TB/s ÷ 140 GB ≈ 24 tokens/s. Batching, weight
+quantization (INT4/FP8) and speculative decoding raise tokens per weight read. Prefill, by
+contrast, is compute-bound.
+"""
+
+[[questions]]
+id = "05-07"
+topic = "In-flight batching"
+question = """
+A chatbot serves requests with very different output lengths (10 to 2,000 tokens). With static
+batching, GPU utilisation is poor. Which technique addresses this most directly?
+"""
+options = [
+  "In-flight (continuous) batching, which removes finished sequences and admits new requests at every decode step",
+  "Increase the static batch size to 256",
+  "Pad all outputs to 2,000 tokens",
+  "Disable the KV cache",
+]
+answer = ["A"]
+explanation = """
+In static batching every request waits until the longest one in the batch finishes, which wastes
+slots. In-flight batching (TensorRT-LLM, vLLM, NIM) schedules at iteration granularity, so slots
+are refilled immediately and throughput rises sharply. A bigger static batch or padding increases
+the waste. Without a KV cache, every step recomputes the whole context.
+"""
+
+[[questions]]
+id = "05-08"
+topic = "Paged KV cache"
+question = "What problem does PagedAttention (a paged KV cache) primarily solve?"
+options = [
+  "Memory fragmentation and over-reservation from allocating contiguous max-length KV buffers per request",
+  "The quadratic compute cost of attention",
+  "Numerical instability of softmax in FP16",
+  "Slow tokenisation of long prompts",
+]
+answer = ["A"]
+explanation = """
+Pre-allocating a contiguous max_seq_len KV buffer per request wastes most of it. Paged KV cache
+allocates fixed-size blocks on demand, like OS virtual memory, which removes fragmentation, fits
+more concurrent sequences, and allows block sharing for common prefixes. It doesn't change
+attention FLOPs.
+"""
+
+[[questions]]
+id = "05-09"
+topic = "Quantization granularity"
+question = """
+INT8 post-training quantization with a single per-tensor scale causes large accuracy loss.
+Inspection shows a few output channels with very large weight magnitudes. What is the best
+first fix?
+"""
+options = [
+  "Use per-channel (or per-group) scales so outlier channels don't inflate the step size for all other channels",
+  "Switch to INT4 per-tensor quantization",
+  "Remove the outlier channels from the model",
+  "Increase the calibration batch size to 10,000",
+]
+answer = ["A"]
+explanation = """
+A single absmax scale is dominated by the outliers, so most weights collapse into a few integer
+levels. Per-channel or group-wise scales (for example groups of 128) give each channel its own
+range. Going to INT4 per-tensor makes it worse, deleting channels breaks the model, and more
+calibration data doesn't fix scale granularity.
+"""
+
+[[questions]]
+id = "05-10"
+topic = "SmoothQuant / W8A8"
+question = """
+You want INT8 for both weights and activations (W8A8) to speed up compute-bound prefill, but
+activation outliers in certain channels ruin accuracy. Which technique is designed for this?
+"""
+options = [
+  "SmoothQuant: migrate the quantization difficulty from activations to weights with a per-channel scaling transformation",
+  "AWQ weight-only INT4",
+  "Knowledge distillation into a smaller student",
+  "Increase the sampling temperature",
+]
+answer = ["A"]
+explanation = """
+SmoothQuant divides activations by per-channel factors and multiplies the matching weight rows
+by the same factors. That is mathematically equivalent but makes activations easy to quantize, so
+W8A8 GEMMs can run on INT8 tensor cores. AWQ is weight-only and doesn't quantize activations.
+Distillation and temperature don't address activation outliers.
+"""
+
+[[questions]]
+id = "05-11"
+topic = "PTQ vs QAT"
+question = "When is quantization-aware training (QAT) worth its extra cost over post-training quantization (PTQ)?"
+options = [
+  "When PTQ at the target precision (for example INT4 or FP4) loses unacceptable accuracy and you can afford a short training phase with simulated quantization",
+  "Always, since PTQ never works for LLMs",
+  "Only for models smaller than 100M parameters",
+  "When you have no training data at all",
+]
+answer = ["A"]
+explanation = """
+PTQ needs only a small calibration set and is usually enough at FP8/INT8. At aggressive
+bit-widths, QAT, where fake-quantization is inserted during fine-tuning, lets the weights adapt
+and recovers accuracy. It needs training data and compute. TensorRT Model Optimizer supports both.
+"""
+
+[[questions]]
+id = "05-12"
+topic = "Speculative decoding"
+question = "Which statements about speculative decoding are correct? (Select TWO.)"
+options = [
+  "A cheap draft model proposes several tokens and the target model verifies them in a single forward pass",
+  "With the standard acceptance rule, the output distribution matches the target model's",
+  "It lowers memory usage because the target model is not loaded",
+  "It gives the largest speed-up at very large batch sizes",
+  "It requires retraining the target model",
+]
+answer = ["A", "B"]
+explanation = """
+Speculative decoding turns several sequential memory-bound decode steps into one verification
+pass. Rejection sampling keeps the output distribution identical to the target model's. Both
+models must be in memory. Gains are largest at low batch, where decode is memory-bound; at high
+batch the GPU is already busy. The target model doesn't change. Variants such as Medusa and EAGLE
+add small draft heads.
+"""
+
+[[questions]]
+id = "05-13"
+topic = "Knowledge distillation"
+question = "In knowledge distillation, why are the soft-target KL term's logits divided by a temperature T > 1 and the term multiplied by T²?"
+options = [
+  "T > 1 softens the teacher's distribution so it shows relative similarities between wrong classes ('dark knowledge'); T² keeps gradient magnitudes comparable to the hard-label loss",
+  "T > 1 makes the student's outputs deterministic; T² speeds up training",
+  "T > 1 is needed to avoid numerical overflow; T² is a regulariser against overfitting",
+  "Temperature only matters at inference time",
+]
+answer = ["A"]
+explanation = """
+High temperature spreads probability mass, so the student learns how the teacher ranks
+alternatives, not just its top choice. The softened gradients scale as 1/T², so multiplying by T²
+balances the soft and hard loss terms. NVIDIA's Minitron uses pruning plus distillation to create
+small models cheaply.
+"""
+
+[[questions]]
+id = "05-14"
+topic = "2:4 sparsity"
+question = "What does 2:4 structured sparsity provide on NVIDIA Ampere and later GPUs?"
+options = [
+  "Sparse tensor cores skip the zeros when exactly 2 of every 4 consecutive weights are zero, for up to 2× matmul throughput",
+  "Arbitrary unstructured sparsity at any ratio is accelerated automatically",
+  "A 4× reduction in KV-cache size",
+  "Removal of 2 out of every 4 transformer layers",
+]
+answer = ["A"]
+explanation = """
+The fixed 2:4 pattern (50% sparsity) is hardware-friendly: the weights are stored compressed with
+metadata, and sparse tensor cores process them at up to 2× dense throughput. Unstructured
+sparsity rarely speeds up GEMMs on GPUs. It affects weights, not the KV cache or layer count.
+Fine-tuning after pruning usually recovers accuracy.
+"""
+
+[[questions]]
+id = "05-15"
+topic = "Latency vs throughput"
+question = """
+Increasing the maximum batch size on an LLM server from 8 to 64 raises total tokens/s by 5× but
+also raises P95 inter-token latency beyond the SLO. What is the most appropriate tuning approach?
+"""
+options = [
+  "Sweep batch size and concurrency, and choose the largest configuration that still meets the latency SLO; add replicas for more throughput",
+  "Always use the maximum batch size because throughput is the only metric",
+  "Always use batch size 1 for the lowest latency",
+  "Disable in-flight batching",
+]
+answer = ["A"]
+explanation = """
+Batching trades per-request latency for throughput. Production tuning finds the operating point
+on the latency–throughput curve that satisfies the SLO (for example with NVIDIA's performance
+tools such as genai-perf), then scales out with replicas. Batch 1 wastes the GPU. Disabling
+in-flight batching lowers efficiency.
+"""
+
+[[questions]]
+id = "05-16"
+topic = "TTFT"
+question = """
+Users complain about a long wait before the first token appears when prompts are long RAG
+contexts (about 12k tokens). Inter-token latency is fine. Which optimisations target TTFT? (Select TWO.)
+"""
+options = [
+  "Prefix/KV-cache reuse for the shared system prompt and frequently repeated documents",
+  "Chunked prefill with enough compute, or FP8 compute for the compute-bound prefill phase",
+  "Weight-only INT4 quantization to speed up decode",
+  "A larger max_tokens for the output",
+  "Speculative decoding",
+]
+answer = ["A", "B"]
+explanation = """
+Time to first token is dominated by prefill of the long prompt. Reusing cached KV for shared
+prefixes skips work, and faster prefill compute (FP8, efficient attention, chunked scheduling)
+shortens it. Weight-only quantization and speculative decoding target the memory-bound decode
+phase. max_tokens affects output length, not TTFT.
+"""
+
+[[questions]]
+id = "05-17"
+topic = "KV cache quantization"
+question = """
+A long-context service is limited to 8 concurrent 32k-token sessions by KV-cache memory. Which
+change most directly doubles the number of sessions with minimal quality loss?
+"""
+options = [
+  "Store the KV cache in FP8 instead of FP16",
+  "Quantize weights from FP16 to FP8 but keep the KV cache in FP16",
+  "Enable tensor parallelism across the same GPU",
+  "Increase max_batch_size in the configuration",
+]
+answer = ["A"]
+explanation = """
+The KV cache is the limiting factor, and halving its bytes per element doubles capacity. FP8 KV
+cache is supported in TensorRT-LLM and NIM with small accuracy impact. Weight quantization frees
+some memory, but the limit here is the per-session cache. Tensor parallelism needs multiple GPUs.
+Raising max_batch_size doesn't create memory.
+"""
+
+[[questions]]
+id = "05-18"
+topic = "TensorRT-LLM"
+question = "Which optimisations does building a TensorRT-LLM engine typically provide over running a model eagerly in PyTorch? (Select TWO.)"
+options = [
+  "Fused kernels (for example fused attention and GEMM plus activation) and optimised plugins that cut kernel launches and memory traffic",
+  "In-flight batching, paged KV cache and quantized (FP8/INT4) execution through the runtime",
+  "Automatic collection of new training data",
+  "Guaranteed identical accuracy to FP32 for any quantization level",
+  "Removal of the need for a GPU",
+]
+answer = ["A", "B"]
+explanation = """
+TensorRT-LLM compiles the model into optimised engines with kernel fusion, efficient attention
+kernels and quantization support, and its runtime provides in-flight batching and paged KV
+caching. It is served through Triton or NIM. It doesn't collect data or run without a GPU, and
+aggressive quantization can reduce accuracy.
+"""
+
+[[questions]]
+id = "05-19"
+topic = "Data loading"
+question = """
+Profiling shows the GPU is idle for 40% of each training step while the CPU prepares batches.
+What should you do first?
+"""
+options = [
+  "Optimise the input pipeline: more DataLoader workers, pinned memory, prefetching, and pre-tokenised data",
+  "Buy a faster GPU",
+  "Enable activation checkpointing",
+  "Increase the model size to use the idle time",
+]
+answer = ["A"]
+explanation = """
+An input-bound pipeline starves the GPU. Parallel workers, pin_memory with non-blocking
+transfers, prefetching, and tokenising offline (or using NVIDIA DALI for heavy preprocessing)
+remove the stall. A faster GPU would idle even more. Checkpointing adds compute and doesn't fix
+input starvation.
+"""
+
+[[questions]]
+id = "05-20"
+topic = "LoRA memory"
+question = """
+Compared with full fine-tuning of a 7B model in BF16 with Adam, what is the dominant source of
+memory savings with LoRA (r=16)?
+"""
+options = [
+  "Gradients and optimizer states are kept only for the adapter parameters, removing about 14 bytes per frozen base parameter",
+  "The base model weights are compressed to 1 bit",
+  "Activations no longer need to be stored",
+  "The KV cache is removed during training",
+]
+answer = ["A"]
+explanation = """
+Frozen parameters need no gradients, fp32 master copies or Adam moments. That's about 14 of the 16
+bytes per parameter. The weights stay in BF16 (4-bit only with QLoRA). Activations still need
+storage for the backward pass through the frozen layers.
+"""

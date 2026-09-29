@@ -1,0 +1,201 @@
+domain = "LLM Architecture"
+code = "01"
+weight = 6
+
+[[questions]]
+id = "01-01"
+topic = "Encoder embeddings"
+question = """
+You are working with a BERT-based encoder model using the Hugging Face Transformers library.
+You want to extract sentence embeddings from a batch of input sentences. Which of the following
+methods correctly retrieves the pooled sentence embedding from the model output?
+"""
+options = [
+  "outputs = model(**inputs); embeddings = outputs.pooler_output",
+  "outputs = model(**inputs); embeddings = outputs.logits[:, 0, :]",
+  "outputs = model.generate(**inputs); embeddings = outputs.sequences",
+  "outputs = model(**inputs); embeddings = outputs.hidden_states[0]",
+]
+answer = ["A"]
+explanation = """
+BertModel returns pooler_output with shape (batch, hidden): the [CLS] token's final hidden state
+passed through a dense layer and tanh. That is the pooled sentence embedding. A bare encoder has
+no logits. generate() is for decoder/seq2seq generation. hidden_states[0] is the embedding-layer
+output (and needs output_hidden_states=True). In practice, masked mean pooling over
+last_hidden_state often gives better similarity embeddings, but "pooled output" means pooler_output.
+"""
+
+[[questions]]
+id = "01-02"
+topic = "Attention scaling"
+question = "Why does scaled dot-product attention divide QKᵀ by √d_k?"
+options = [
+  "To keep the dot products from growing with dimension, which would push softmax into saturated regions with vanishing gradients",
+  "To normalise attention weights so each row sums to one",
+  "To reduce the FLOPs of the attention matrix multiplication",
+  "To make attention invariant to token order",
+]
+answer = ["A"]
+explanation = """
+For random vectors with unit-variance components, the dot product's variance grows linearly with
+d_k. Large logits make softmax nearly one-hot, and its gradients vanish. Dividing by √d_k restores
+unit variance. Row normalisation is softmax's job. The scaling saves no compute, and attention
+without positional information is already permutation-equivariant.
+"""
+
+[[questions]]
+id = "01-03"
+topic = "Architecture families"
+question = """
+A team needs (1) a model for high-throughput semantic search embeddings and (2) a model for
+open-ended multi-turn chat. Which pairing of architectures is most appropriate?
+"""
+options = [
+  "Encoder-only for embeddings; decoder-only for chat",
+  "Decoder-only for embeddings; encoder-only for chat",
+  "Encoder-decoder for both, because it contains both components",
+  "Encoder-only for both, fine-tuned with a causal LM head for chat",
+]
+answer = ["A"]
+explanation = """
+Bidirectional encoders (BERT, E5 and NV-Embed-style retrievers) produce strong fixed-size
+representations cheaply. Decoder-only causal LMs are the standard for autoregressive generation
+and in-context learning. Encoders aren't trained autoregressively and can't generate
+open-ended text. Encoder-decoder models suit transduction tasks like translation but aren't the
+default for chat or embeddings.
+"""
+
+[[questions]]
+id = "01-04"
+topic = "GQA / KV cache"
+question = """
+You are serving a 70B model and the KV cache limits the batch size at long context. Which
+architectural feature, if present in the chosen model, most directly reduces the KV-cache
+footprint per token?
+"""
+options = [
+  "Grouped-query attention (fewer key/value heads than query heads)",
+  "SwiGLU activation in the feed-forward block",
+  "RMSNorm instead of LayerNorm",
+  "Weight tying between the embedding and LM head",
+]
+answer = ["A"]
+explanation = """
+KV-cache size is 2 × layers × kv_heads × head_dim × tokens × bytes. GQA shares each K/V head
+across a group of query heads, so the kv_heads term shrinks. Llama-2-70B uses 8 KV heads for 64
+query heads, an 8× reduction. The activation function, the norm type and weight tying affect
+parameters or compute but not the cache.
+"""
+
+[[questions]]
+id = "01-05"
+topic = "Positional encoding"
+question = "Which property of Rotary Position Embeddings (RoPE) makes it popular in modern LLMs?"
+options = [
+  "The query–key dot product depends only on the relative distance between positions",
+  "It adds a learned vector per absolute position to the token embedding",
+  "It removes the need for a causal mask",
+  "It makes attention linear in sequence length",
+]
+answer = ["A"]
+explanation = """
+RoPE rotates query and key feature pairs by position-dependent angles. Because rotations compose,
+⟨R(m)q, R(n)k⟩ = ⟨q, R(n−m)k⟩, so attention scores encode relative offsets. This also makes
+context-length extension (rope scaling, NTK, YaRN) practical. Learned absolute embeddings are the
+GPT-2/BERT approach. RoPE doesn't replace masking and doesn't change the O(n²) cost.
+"""
+
+[[questions]]
+id = "01-06"
+topic = "FlashAttention"
+question = "Which statement about FlashAttention is correct?"
+options = [
+  "It computes exact attention but tiles the computation in on-chip SRAM to avoid materialising the n×n matrix in HBM",
+  "It approximates attention with low-rank projections to achieve linear complexity",
+  "It only speeds up inference, not training",
+  "It requires changing the model architecture and retraining from scratch",
+]
+answer = ["A"]
+explanation = """
+FlashAttention is an IO-aware exact algorithm. It fuses the attention kernel and uses tiling with
+an online softmax, so the full score matrix is never written to GPU memory. This cuts memory
+traffic and activation memory. It speeds up both training and inference and is a drop-in kernel
+replacement. Low-rank or linear attention variants (Linformer, Performer) are approximations.
+"""
+
+[[questions]]
+id = "01-07"
+topic = "Parameter distribution"
+question = """
+In a standard GPT-style decoder block with a 4× FFN expansion, roughly what fraction of the
+block's parameters sit in the feed-forward network?
+"""
+options = ["About two thirds", "About one third", "About one tenth", "Almost all (over 95%)"]
+answer = ["A"]
+explanation = """
+Attention has four d×d projections (Q, K, V, O), which is 4d². The FFN has d×4d and 4d×d, which is
+8d². So the FFN holds 8/12 ≈ 67% of the block. This is why MoE replaces the FFN: it is where most
+capacity lives. It is also why LoRA on the MLP layers, not just attention, often helps.
+"""
+
+[[questions]]
+id = "01-08"
+topic = "Mixture of Experts"
+question = """
+A Mixture-of-Experts model has 8 experts per layer with top-2 routing. Compared with a dense model
+of the same total parameter count, what is the main effect at inference?
+"""
+options = [
+  "Fewer FLOPs per token because only 2 of 8 experts run, but all expert weights must still be held in GPU memory",
+  "Lower memory use, because only the two active experts are loaded",
+  "Identical FLOPs per token, but better quality from ensembling",
+  "Smaller KV cache, because the experts share attention heads",
+]
+answer = ["A"]
+explanation = """
+MoE decouples total parameters from active parameters. Each token runs through only the top-k
+experts, so compute per token is much lower. Every expert can be chosen by some token, though, so
+all weights must stay resident, and memory is set by the total parameter count. That is why expert
+parallelism shards the experts across GPUs. MoE layers replace FFNs, so the KV cache is unchanged.
+"""
+
+[[questions]]
+id = "01-09"
+topic = "Normalisation"
+question = "Why do most modern decoder LLMs use pre-norm (x + f(Norm(x))) rather than post-norm?"
+options = [
+  "Pre-norm keeps a clean residual path, which gives more stable gradients when training very deep stacks, often without learning-rate warm-up tricks",
+  "Pre-norm removes the need for residual connections",
+  "Pre-norm halves the number of parameters in each block",
+  "Pre-norm is required for the causal mask to work",
+]
+answer = ["A"]
+explanation = """
+In pre-norm the identity path from input to output is never normalised, so gradients reach early
+layers undistorted, and deep models train stably. Post-norm (the original Transformer and BERT)
+needs careful warm-up and can diverge at depth. The residuals are still there, the parameter
+count is essentially unchanged, and masking has nothing to do with norm placement.
+"""
+
+[[questions]]
+id = "01-10"
+topic = "Vocabulary size"
+question = """
+You increase the tokenizer vocabulary from 32k to 128k tokens for a d_model=4096 model with untied
+embeddings. Which trade-off is most accurate? (Select TWO.)
+"""
+options = [
+  "Sequences become shorter for the same text, reducing attention cost and KV-cache use per document",
+  "The input embedding and LM head together grow by roughly 0.8B parameters",
+  "The number of transformer layers must increase to compensate",
+  "Attention head dimension must be increased to match the vocabulary",
+  "The softmax over the vocabulary becomes cheaper",
+]
+answer = ["A", "B"]
+explanation = """
+A larger vocabulary encodes text in fewer tokens, which helps context usage and attention cost,
+especially for multilingual and code data. The cost is embedding and output-layer size:
+(128k − 32k) × 4096 ≈ 0.4B per matrix, so ≈ 0.8B for untied input and output matrices. The final
+softmax becomes more expensive, not cheaper. Layer count and head dimension are independent of
+vocabulary size.
+"""

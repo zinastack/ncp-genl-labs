@@ -1,0 +1,344 @@
+domain = "Prompt Engineering"
+code = "02"
+weight = 13
+
+[[questions]]
+id = "02-01"
+topic = "Adaptation without parameter updates"
+question = """
+A company wants to adapt a general-purpose LLM to financial sentiment analysis. They cannot
+retrain the model but need outputs that are consistent, explainable, and aligned with the
+company's risk guidelines. Which methods best achieve this without parameter updates? (Select TWO.)
+"""
+options = [
+  "Few-shot prompting with curated examples that reflect the company's risk guidelines, plus a system prompt stating those guidelines",
+  "Chain-of-thought prompting that requires a step-by-step rationale in a fixed structured output format",
+  "LoRA fine-tuning on the company's labelled sentiment data",
+  "Raising the sampling temperature so the model explores more interpretations",
+  "Continued pre-training on financial news",
+]
+answer = ["A", "B"]
+explanation = """
+Only prompt-level techniques avoid parameter updates. Curated few-shot demonstrations plus
+explicit guidelines steer the model toward the company's labelling policy, which gives
+alignment and consistency. CoT with a structured rationale makes each decision explainable and
+auditable. LoRA and continued pre-training both update weights. Higher temperature makes
+outputs less consistent. Use temperature at or near 0 for classification.
+"""
+
+[[questions]]
+id = "02-02"
+topic = "Zero-shot"
+question = """
+You are testing a language model on a new classification task without providing any labelled
+examples in the prompt. The model performs reasonably well by interpreting the task solely from
+the instruction. Which prompt engineering approach are you using, and why might it work?
+"""
+options = [
+  "Zero-shot prompting; instruction tuning taught the model to generalise from natural-language task descriptions",
+  "Few-shot prompting; the model retrieves similar examples from its training data at inference time",
+  "Chain-of-thought prompting; the model decomposes the problem into steps automatically",
+  "Prompt tuning; the model learns soft prompt embeddings from the instruction during inference",
+]
+answer = ["A"]
+explanation = """
+No demonstrations means zero-shot. It works because instruction-tuned and RLHF-aligned models
+were trained on many tasks phrased as instructions, so they generalise to new instructions.
+Few-shot needs in-prompt examples. Models don't retrieve training data at inference. CoT needs a
+reasoning cue or examples. Prompt tuning trains soft prompt embeddings, which is a
+parameter-efficient training method, not something that happens at inference.
+"""
+
+[[questions]]
+id = "02-03"
+topic = "Domain adaptation with few examples"
+question = """
+You are designing prompts for an LLM to assist radiologists by summarising medical imaging
+reports. Which prompt engineering strategy is most suitable for ensuring domain adaptation with
+minimal labelled examples?
+"""
+options = [
+  "Few-shot prompting with a handful of representative report-to-summary pairs, a radiology-specific system role, and a fixed summary template (findings, impression, follow-up)",
+  "Zero-shot prompting with a high temperature to encourage comprehensive summaries",
+  "Full fine-tuning on the few available examples",
+  "Removing domain terminology from the input so the general model understands it better",
+]
+answer = ["A"]
+explanation = """
+With minimal labelled data, in-context learning is the most effective adaptation. A few
+high-quality domain demonstrations teach terminology, level of detail and structure. A domain
+persona and a fixed output template add consistency, which clinical workflows need. High
+temperature adds variability. Fine-tuning on a handful of examples overfits. Stripping
+terminology loses clinically important information.
+"""
+
+[[questions]]
+id = "02-04"
+topic = "Chain-of-thought"
+question = """
+A model answers multi-step arithmetic word problems poorly with direct prompting. Which change is
+most likely to improve accuracy without fine-tuning?
+"""
+options = [
+  "Add worked examples that show intermediate reasoning steps before the final answer (few-shot CoT)",
+  "Lower max_tokens so the model answers more concisely",
+  "Add more examples that show only the final numeric answers",
+  "Increase top_k to 500",
+]
+answer = ["A"]
+explanation = """
+Chain-of-thought prompting gives the model room to generate intermediate computations, which
+greatly improves multi-step reasoning in sufficiently large models. Cutting max_tokens removes
+exactly the room the reasoning needs. Answer-only examples teach the format but not the
+procedure. A larger top_k only adds randomness.
+"""
+
+[[questions]]
+id = "02-05"
+topic = "Self-consistency"
+question = """
+You implement self-consistency for a reasoning task: generate several answers and take the
+majority vote. All 10 samples come back identical, and accuracy does not improve over one sample.
+What is the most likely cause?
+"""
+options = [
+  "Decoding is greedy (temperature 0), so every sample follows the same reasoning path",
+  "The model is too large for self-consistency to help",
+  "Majority voting only works with an odd number of samples",
+  "The prompt contains chain-of-thought instructions",
+]
+answer = ["A"]
+explanation = """
+Self-consistency needs diverse reasoning paths, so you sample with temperature above 0 (for
+example 0.7). The final answers then vary, and the vote marginalises over paths. With greedy
+decoding every sample is the same and voting adds nothing. CoT is a prerequisite, not the
+problem. Ties can be broken with any rule, so the sample count doesn't need to be odd.
+"""
+
+[[questions]]
+id = "02-06"
+topic = "Sampling parameters"
+question = """
+An extraction service must return the same structured output for the same input on every call.
+Which decoding settings are most appropriate?
+"""
+options = [
+  "temperature=0 (greedy), a fixed seed, explicit stop sequences, and a bounded max_tokens",
+  "temperature=1.0 with top_p=0.95",
+  "temperature=0.7 with a repetition penalty of 2.0",
+  "Beam search with 1 beam and temperature=1.5",
+]
+answer = ["A"]
+explanation = """
+Determinism comes from greedy decoding (or a fixed seed when sampling), and stop sequences and
+max_tokens bound the output. Sampling at T=1.0 or 0.7 adds variation. A heavy repetition penalty
+can distort structured tokens like repeated JSON keys. A temperature of 1.5 is the opposite of
+what extraction needs.
+"""
+
+[[questions]]
+id = "02-07"
+topic = "Top-p"
+question = "How does nucleus (top-p) sampling differ from top-k sampling?"
+options = [
+  "Top-p keeps the smallest set of tokens whose cumulative probability reaches p, so the candidate set grows or shrinks with the model's confidence",
+  "Top-p always keeps exactly p tokens",
+  "Top-p divides the logits by p before the softmax",
+  "Top-p penalises tokens that have already appeared",
+]
+answer = ["A"]
+explanation = """
+Top-k keeps a fixed number of candidates regardless of the distribution. Top-p adapts: when the
+model is confident, a few tokens reach p; when it is uncertain, many do. Dividing logits is
+temperature, and penalising repeats is the repetition or frequency penalty.
+"""
+
+[[questions]]
+id = "02-08"
+topic = "Structured output"
+question = """
+A downstream parser crashes because the model sometimes adds prose around its JSON or invents
+extra label values. What is the most robust fix at inference time?
+"""
+options = [
+  "Use guided/constrained decoding (for example guided_json with a schema or guided_choice) so invalid tokens are masked during generation, and validate the result",
+  "Add 'please return valid JSON' in capital letters to the prompt",
+  "Increase the temperature so the model tries different formats",
+  "Switch to beam search with 10 beams",
+]
+answer = ["A"]
+explanation = """
+Constrained decoding enforces the schema or label set at every step by masking logits, so the
+output is valid by construction. NIM, vLLM and TensorRT-LLM logits processors all support it.
+Stronger wording helps but guarantees nothing. Higher temperature makes violations more likely.
+Beam search doesn't enforce a grammar.
+"""
+
+[[questions]]
+id = "02-09"
+topic = "Few-shot example selection"
+question = """
+A few-shot classifier uses the same 5 fixed examples for every query and performs poorly on
+rare categories. Which improvement is most effective without training? (Select TWO.)
+"""
+options = [
+  "Retrieve the k most similar labelled examples for each query using embeddings (dynamic few-shot)",
+  "Make sure the selected examples cover all labels in a balanced way and randomise their order",
+  "Always put the examples of the most frequent class last",
+  "Remove the task instruction to save tokens",
+  "Use the same example repeated five times",
+]
+answer = ["A", "B"]
+explanation = """
+Dynamic example selection supplies demonstrations that resemble the query, which particularly
+helps rare categories. Label balance and randomised order reduce majority-label and recency
+biases. Putting the frequent class last increases recency bias toward it. Dropping the
+instruction removes the task definition, and a repeated example adds no information.
+"""
+
+[[questions]]
+id = "02-10"
+topic = "Prompt tuning vs prompt engineering"
+question = "Which statement correctly distinguishes p-tuning / prompt tuning from prompt engineering?"
+options = [
+  "Prompt tuning learns continuous 'virtual token' embeddings by gradient descent while the base model stays frozen; prompt engineering writes discrete text and trains nothing",
+  "Prompt tuning and prompt engineering both only change the text of the prompt",
+  "Prompt tuning updates all model weights; prompt engineering updates only the embeddings",
+  "Prompt engineering needs labelled data; prompt tuning does not",
+]
+answer = ["A"]
+explanation = """
+P-tuning and prompt tuning are parameter-efficient fine-tuning methods. They optimise a small
+set of soft prompt embeddings (in NeMo, p-tuning uses a small prompt encoder) and keep the LLM
+frozen. They need training data and a training loop. Prompt engineering is manual or automated
+editing of the natural-language prompt, with no gradients involved.
+"""
+
+[[questions]]
+id = "02-11"
+topic = "Hallucination and grounding"
+question = """
+A support chatbot confidently gives outdated policy information. The policies change weekly.
+What is the best first step?
+"""
+options = [
+  "Retrieval-augmented generation: retrieve the current policy passages, instruct the model to answer only from them with citations, and to say it doesn't know otherwise",
+  "Lower the temperature to 0 so the model stops hallucinating",
+  "Fine-tune the model every week on the new policies",
+  "Add 'do not hallucinate' to the system prompt",
+]
+answer = ["A"]
+explanation = """
+Knowledge that changes often belongs in retrieval, not in the weights. RAG grounds answers in
+current documents, and citations and refusal instructions make the answers verifiable.
+Temperature 0 makes outputs deterministic, not factual. Weekly fine-tuning is costly and slow and
+still leaves hallucinations. Instructions alone don't supply the missing knowledge.
+"""
+
+[[questions]]
+id = "02-12"
+topic = "Chat templates"
+question = """
+After switching from a base model to its instruct variant served through raw text completion,
+responses become erratic and sometimes continue the user's message. What is the most likely
+cause?
+"""
+options = [
+  "The prompt isn't formatted with the model's chat template, including the special role tokens and the assistant generation prompt",
+  "The instruct model has a smaller vocabulary than the base model",
+  "Instruct models need temperature above 1.5",
+  "The KV cache is disabled",
+]
+answer = ["A"]
+explanation = """
+Instruct models are trained on a specific chat template (Llama-3 header tokens, ChatML
+<|im_start|> and so on). Without the template and the trailing assistant header, the model
+doesn't know a new assistant turn has started, so it may continue the user text. Use
+tokenizer.apply_chat_template(..., add_generation_prompt=True) or a chat completions endpoint.
+"""
+
+[[questions]]
+id = "02-13"
+topic = "ReAct"
+question = """
+An assistant must answer questions that require looking up live inventory through an API and then
+reasoning about the results. Which prompting pattern fits best?
+"""
+options = [
+  "ReAct: interleave reasoning ('Thought'), tool calls ('Action') and tool results ('Observation') until a final answer",
+  "Zero-shot prompting with a longer context window",
+  "Self-consistency with 20 samples",
+  "One-shot prompting with an example answer",
+]
+answer = ["A"]
+explanation = """
+ReAct combines chain-of-thought with actions, so the model decides when to call tools and then
+reasons over what comes back. That grounds answers in live data. Zero-shot, self-consistency and
+one-shot prompting can't reach external data at all.
+"""
+
+[[questions]]
+id = "02-14"
+topic = "Prompt structure"
+question = """
+A prompt includes long user-supplied documents, and the model sometimes follows instructions
+embedded in those documents. Which prompt design practices reduce this risk? (Select TWO.)
+"""
+options = [
+  "Wrap untrusted content in clear delimiters (for example XML tags) and tell the model to treat it as data, not instructions",
+  "Put the system rules in the system message and restate the task after the document",
+  "Put the untrusted document in the system message so it has higher priority",
+  "Increase temperature so injected instructions are less likely to be followed",
+  "Remove all delimiters so the text flows naturally",
+]
+answer = ["A", "B"]
+explanation = """
+Delimiting untrusted input and stating that it is data separates instructions from content.
+Keeping the rules in the system role and restating the task after long inputs counters
+instruction drift and recency effects. Putting untrusted text in the system message gives it
+more authority, which is the wrong direction. Temperature doesn't defend against injection.
+Pair these practices with guardrails such as NeMo Guardrails input rails (Lab 10).
+"""
+
+[[questions]]
+id = "02-15"
+topic = "Temperature math"
+question = """
+The logits for three tokens are [2.0, 1.0, 0.0]. What happens to the probability of the top token
+as temperature decreases from 1.0 toward 0?
+"""
+options = [
+  "It increases toward 1.0, because dividing by a small T magnifies differences between logits",
+  "It decreases toward 1/3, because the distribution becomes uniform",
+  "It stays the same, because temperature only affects sampling speed",
+  "It becomes 0, because low temperature suppresses the most likely token",
+]
+answer = ["A"]
+explanation = """
+softmax(z/T): as T→0 the gaps between scaled logits grow without bound and the distribution
+approaches one-hot on the argmax, which is greedy decoding. As T→∞ it approaches uniform. At T=1
+the top probability here is about 0.67. At T=0.5 it is about 0.87.
+"""
+
+[[questions]]
+id = "02-16"
+topic = "Choosing an adaptation strategy"
+question = """
+A legal-tech team has 50,000 high-quality annotated contract clauses and needs a consistent
+clause classifier with low latency and short prompts. Prompt engineering already reaches 78%
+accuracy. What is the most appropriate next step?
+"""
+options = [
+  "Parameter-efficient fine-tuning (for example LoRA) on the annotated data",
+  "Add all 50,000 examples to the prompt as few-shot demonstrations",
+  "Switch to zero-shot prompting to reduce prompt length",
+  "Increase top_p to 1.0",
+]
+answer = ["A"]
+explanation = """
+With plenty of labelled data and a need for short prompts and low latency, supervised PEFT
+bakes the task into the weights. It usually beats few-shot accuracy and removes long
+demonstrations from every request. 50k examples won't fit in a context window. Zero-shot
+typically does worse than the current few-shot baseline. top_p has nothing to do with
+classification accuracy.
+"""
