@@ -92,3 +92,8 @@ labs/<N>-<section>/
 
 60–70 questions · 120 minutes · $200 · valid 2 years · recommended experience: 2–3 years with
 LLMs, transformers, prompt engineering, distributed parallelism and PEFT.
+
+## License
+
+[MIT](LICENSE). This is an independent study resource, not affiliated with or endorsed by NVIDIA.
+The practice questions are original and are not taken from the certification exam.
