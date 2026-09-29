@@ -96,3 +96,9 @@ Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through ever
 | 6 | `extract_final_answer`, `self_consistency` | CoT answer parsing and majority vote |
 | 7 | `select_examples` | dynamic few-shot by cosine similarity |
 | 8 | `parse_json_output` | robust structured-output parsing |
+| 9 | `build_rag_prompt` | grounding with citations, context budget, delimiters against injection |
+| 10 | `parse_react`, `run_react` | the ReAct agent loop: Thought → Action → Observation |
+| 11 | `beam_search` | beam search vs greedy decoding |
+| 12 | `frequency_presence_penalty` | OpenAI-style frequency and presence penalties |
+
+Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`](SOLUTION.md).
