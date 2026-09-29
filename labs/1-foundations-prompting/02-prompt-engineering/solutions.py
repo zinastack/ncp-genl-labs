@@ -1,4 +1,7 @@
-"""Lab 02 — reference solutions."""
+"""Lab 02 — reference solutions. Try exercises.py first.
+
+Every function is explained step by step, with worked numeric examples, in SOLUTION.md.
+"""
 
 import json
 import re
@@ -8,8 +11,10 @@ import numpy as np
 
 
 def build_prompt(instruction, examples, query, input_label="Input", output_label="Output"):
+    # Instruction, then one block per demonstration, then the query block left open at
+    # "Output:" so the model's most natural continuation is the answer.
     blocks = [instruction]
-    blocks += [f"{input_label}: {x}\n{output_label}: {y}" for x, y in examples]
+    blocks += [f"{input_label}: {x}\n{output_label}: {y}" for x, y in examples]  # empty → zero-shot
     blocks.append(f"{input_label}: {query}\n{output_label}:")
     return "\n\n".join(blocks)
 
@@ -17,36 +22,38 @@ def build_prompt(instruction, examples, query, input_label="Input", output_label
 def to_chatml(messages, add_generation_prompt=True):
     out = "".join(f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>\n" for m in messages)
     if add_generation_prompt:
-        out += "<|im_start|>assistant\n"
+        out += "<|im_start|>assistant\n"  # open the assistant turn, or the model may continue the user's
     return out
 
 
 def _softmax(z):
-    z = z - np.max(z)
+    z = z - np.max(z)  # stability trick from Lab 01 (-inf entries stay -inf → probability 0)
     e = np.exp(z)
     return e / e.sum()
 
 
 def apply_temperature(logits, temperature):
-    if temperature == 0:
+    if temperature == 0:  # the T → 0 limit is greedy decoding: all mass on the argmax
         probs = np.zeros_like(logits, dtype=float)
         probs[np.argmax(logits)] = 1.0
         return probs
-    return _softmax(logits / temperature)
+    return _softmax(logits / temperature)  # small T stretches gaps (sharper), large T shrinks them
 
 
 def top_k_filter(logits, k):
-    out = np.full_like(logits, -np.inf, dtype=float)
-    keep = np.argsort(logits)[-k:]
+    out = np.full_like(logits, -np.inf, dtype=float)  # start with everything forbidden
+    keep = np.argsort(logits)[-k:]  # indices of the k largest logits
     out[keep] = logits[keep]
     return out
 
 
 def top_p_filter(logits, p):
     probs = _softmax(logits)
-    order = np.argsort(-probs)
+    order = np.argsort(-probs)  # most probable first
     cumulative = np.cumsum(probs[order])
-    n_keep = int(np.searchsorted(cumulative, p) + 1)  # first index where cum >= p, inclusive
+    # First position where the running total reaches p, +1 to include it. The top token is
+    # always kept, even for tiny p.
+    n_keep = int(np.searchsorted(cumulative, p) + 1)
     out = np.full_like(logits, -np.inf, dtype=float)
     keep = order[:n_keep]
     out[keep] = logits[keep]
@@ -54,26 +61,28 @@ def top_p_filter(logits, p):
 
 
 def apply_repetition_penalty(logits, generated_ids, penalty):
-    out = logits.astype(float).copy()
-    for t in set(generated_ids):
+    out = logits.astype(float).copy()  # never modify the caller's array
+    for t in set(generated_ids):  # each seen token penalised once
+        # Both branches move the logit DOWN: dividing a negative would move it up.
         out[t] = out[t] / penalty if out[t] > 0 else out[t] * penalty
     return out
 
 
 def constrain_to_choices(logits, allowed_ids):
+    # Guided decoding: any token outside the allowed set becomes impossible.
     out = np.full_like(logits, -np.inf, dtype=float)
     out[allowed_ids] = logits[allowed_ids]
     return out
 
 
-# Capture lazily up to a sentence-ending period (". " or "." at end) or the end of the line,
-# so "The answer is 3.5." gives "3.5".
+# "the answer is X" / "Answer: X". Lazy (.*?) stops at a sentence-ending period (". " or "." at
+# the end) or at the end of the line, so "The answer is 3.5." gives "3.5".
 _ANSWER = re.compile(r"(?:the answer is|answer:)[ \t]*(.*?)[ \t]*(?:\.(?=\s|$)|$)", re.IGNORECASE | re.MULTILINE)
 
 
 def extract_final_answer(text):
     matches = [m.group(1) for m in _ANSWER.finditer(text) if m.group(1)]
-    return matches[-1] if matches else None
+    return matches[-1] if matches else None  # last one wins: models often self-correct
 
 
 def self_consistency(completions):
@@ -82,26 +91,29 @@ def self_consistency(completions):
         return None, 0.0
     counts = Counter(answers)  # Counter preserves first-seen order, so ties go to the earliest
     winner, votes = counts.most_common(1)[0]
-    return winner, votes / len(answers)
+    return winner, votes / len(answers)  # agreement doubles as a confidence score
 
 
 def select_examples(query_vec, example_vecs, k):
+    # Cosine similarity: normalise to length 1 so direction (meaning) counts, not magnitude.
     q = query_vec / np.linalg.norm(query_vec)
     e = example_vecs / np.linalg.norm(example_vecs, axis=1, keepdims=True)
-    sims = e @ q
+    sims = e @ q  # one product gives every cosine
     return [int(i) for i in np.argsort(-sims, kind="stable")[:k]]
 
 
 def parse_json_output(text, required_keys=()):
     decoder = json.JSONDecoder()
-    for match in re.finditer(r"\{", text):
+    for match in re.finditer(r"\{", text):  # every "{" is a candidate start of the object
         try:
+            # Parse ONE JSON value starting here and ignore trailing text. A real parser
+            # handles braces inside strings, which a regex like \{.*\} does not.
             obj, _ = decoder.raw_decode(text, match.start())
         except json.JSONDecodeError:
             continue
         if isinstance(obj, dict):
             missing = [k for k in required_keys if k not in obj]
             if missing:
-                raise ValueError(f"missing keys: {missing}")
+                raise ValueError(f"missing keys: {missing}")  # caller can retry the LLM
             return obj
     raise ValueError("no JSON object found")
