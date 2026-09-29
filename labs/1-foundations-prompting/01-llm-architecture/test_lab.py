@@ -13,6 +13,9 @@ def test_1_softmax(lab):
     big = np.array([1000.0, 1001.0, 1002.0])
     assert np.all(np.isfinite(lab.softmax(big))), "overflow: subtract the max first"
     np.testing.assert_allclose(lab.softmax(np.array([0.0, -np.inf])), [1.0, 0.0])
+    fully_masked = lab.softmax(np.array([[1.0, 2.0], [-np.inf, -np.inf]]))
+    assert np.array_equal(fully_masked[1], [0.0, 0.0]), "a fully-masked row must be zeros, not nan"
+    np.testing.assert_allclose(fully_masked[0].sum(), 1.0)
 
 
 def test_2_causal_mask(lab):
