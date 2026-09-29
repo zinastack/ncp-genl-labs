@@ -111,3 +111,71 @@ def train(
         opt.step()
         losses.append(loss.item())
     return losses
+
+
+# The 16 NormalFloat-4 levels from the QLoRA paper (as used by bitsandbytes): quantiles of a
+# normal distribution rescaled to [-1, 1], with an exact 0.
+NF4_LEVELS = torch.tensor([
+    -1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453, -0.28444138169288635,
+    -0.18477343022823334, -0.09105003625154495, 0.0, 0.07958029955625534, 0.16093020141124725,
+    0.24611230194568634, 0.33791524171829224, 0.44070982933044434, 0.5626170039176941,
+    0.7229568362236023, 1.0,
+])
+
+
+def nf4_quantize(w: torch.Tensor, block_size: int = 64) -> tuple[torch.Tensor, torch.Tensor]:
+    blocks = w.reshape(-1, block_size)
+    absmax = blocks.abs().amax(dim=1, keepdim=True).clamp(min=1e-12)  # one scale per block of 64
+    normed = blocks / absmax  # now in [-1, 1]
+    # Each weight becomes the index (0–15, i.e. 4 bits) of the nearest NF4 level.
+    codes = (normed.unsqueeze(-1) - NF4_LEVELS).abs().argmin(dim=-1).to(torch.uint8)
+    return codes, absmax
+
+
+def nf4_dequantize(codes: torch.Tensor, absmax: torch.Tensor, shape: torch.Size) -> torch.Tensor:
+    return (NF4_LEVELS[codes.long()] * absmax).reshape(shape)  # level × block scale
+
+
+class SoftPrompt(nn.Module):
+    def __init__(self, n_virtual: int, d_model: int) -> None:
+        super().__init__()
+        # The ONLY trainable weights: n_virtual "virtual token" embeddings. The LLM stays frozen.
+        self.prompt = nn.Parameter(torch.randn(n_virtual, d_model) * 0.02)
+
+    def forward(self, input_embeds: torch.Tensor) -> torch.Tensor:
+        # Prepend the same learned vectors to every sequence in the batch: (B, n + T, d).
+        batch = input_embeds.shape[0]
+        return torch.cat([self.prompt.unsqueeze(0).expand(batch, -1, -1), input_embeds], dim=1)
+
+
+def reward_model_loss(reward_chosen: torch.Tensor, reward_rejected: torch.Tensor) -> torch.Tensor:
+    # Bradley–Terry: P(chosen beats rejected) = σ(r_c − r_r). Maximise its log-likelihood.
+    return -F.logsigmoid(reward_chosen - reward_rejected).mean()
+
+
+def preference_accuracy(reward_chosen: torch.Tensor, reward_rejected: torch.Tensor) -> float:
+    return (reward_chosen > reward_rejected).float().mean().item()  # how often the RM agrees with humans
+
+
+class MultiLoRALinear(nn.Module):
+    def __init__(self, base: nn.Linear, adapters: dict[str, tuple[torch.Tensor, torch.Tensor, float]]) -> None:
+        super().__init__()
+        self.base = base  # ONE copy of the big weight, shared by every customer
+        self.adapters = adapters  # name → (A, B, scaling): megabytes each
+
+    def forward(self, x: torch.Tensor, adapter_names: list[str | None]) -> torch.Tensor:
+        out = self.base(x)  # the expensive part runs once for the whole mixed batch
+        for i, name in enumerate(adapter_names):  # the cheap low-rank part is per request
+            if name is not None:
+                a, b, scaling = self.adapters[name]
+                out[i] = out[i] + (x[i] @ a.T @ b.T) * scaling
+        return out
+
+
+def lr_at_step(step: int, max_lr: float, warmup_steps: int, total_steps: int, min_lr: float = 0.0) -> float:
+    if step < warmup_steps:
+        # Linear warm-up: Adam's early moment estimates are noisy, so start with small steps.
+        return max_lr * (step + 1) / warmup_steps
+    # Cosine decay from max_lr to min_lr over the remaining steps: large steps early, fine steps at the end.
+    progress = min(1.0, (step - warmup_steps) / max(1, total_steps - warmup_steps))
+    return min_lr + 0.5 * (max_lr - min_lr) * (1 + math.cos(math.pi * progress))

@@ -103,3 +103,71 @@ def test_8_lora_finetune_keeps_base_frozen(lab):
     for name, value in frozen.items():
         key = name.replace(".weight", ".base.weight").replace(".bias", ".base.bias")
         torch.testing.assert_close(after.get(key, after.get(name)), value)
+
+
+def test_9_nf4(lab):
+    torch.manual_seed(0)
+    w = torch.randn(256, 256) * 0.02
+    codes, absmax = lab.nf4_quantize(w)
+    assert codes.dtype == torch.uint8 and codes.max() <= 15 and absmax.shape == (256 * 256 // 64, 1)
+    w_hat = lab.nf4_dequantize(codes, absmax, w.shape)
+    assert w_hat.shape == w.shape
+    err_nf4 = (w_hat - w).abs().mean()
+    # Uniform 4-bit on the same blocks: NF4 levels suit bell-shaped weights better.
+    b = w.reshape(-1, 64)
+    am = b.abs().amax(1, keepdim=True)
+    levels = torch.linspace(-1, 1, 16)
+    uniform = (levels[((b / am).unsqueeze(-1) - levels).abs().argmin(-1)] * am).reshape(w.shape)
+    assert err_nf4 < (uniform - w).abs().mean(), "NF4 beats uniform 4-bit on normally distributed weights"
+    assert torch.all(w_hat.reshape(-1, 64).abs().amax(1, keepdim=True) == absmax), "each block's max is exact"
+
+
+def test_10_soft_prompt(lab):
+    sp = lab.SoftPrompt(n_virtual=5, d_model=16)
+    x = torch.randn(3, 7, 16)
+    out = sp(x)
+    assert out.shape == (3, 12, 16)
+    torch.testing.assert_close(out[:, 5:], x)
+    torch.testing.assert_close(out[0, :5], out[2, :5])  # the same prompt for every sequence
+    assert sum(p.numel() for p in sp.parameters()) == 5 * 16, "only n_virtual × d parameters"
+    frozen = nn.Linear(16, 2)
+    for p in frozen.parameters():
+        p.requires_grad = False
+    frozen(sp(x)).sum().backward()
+    assert sp.prompt.grad is not None and frozen.weight.grad is None, "gradients flow into the soft prompt only"
+
+
+def test_11_reward_model(lab):
+    rc, rr = torch.tensor([2.0, 0.5, 1.0]), torch.tensor([0.0, 1.0, 1.0])
+    expected = -(F.logsigmoid(torch.tensor(2.0)) + F.logsigmoid(torch.tensor(-0.5)) + F.logsigmoid(torch.tensor(0.0))) / 3
+    torch.testing.assert_close(lab.reward_model_loss(rc, rr), expected)
+    assert lab.preference_accuracy(rc, rr) == pytest.approx(1 / 3), "ties don't count as correct"
+
+
+def test_12_multi_lora(lab):
+    torch.manual_seed(0)
+    base = nn.Linear(8, 4)
+    adapters = {name: (torch.randn(2, 8), torch.randn(4, 2), 0.5) for name in ("acme", "globex")}
+    layer = lab.MultiLoRALinear(base, adapters)
+    x = torch.randn(3, 8)
+    with torch.no_grad():
+        out = layer(x, ["acme", None, "globex"])
+    for i, name in enumerate(["acme", None, "globex"]):
+        single = lab.LoRALinear(base, r=2, alpha=1.0)
+        if name:
+            with torch.no_grad():
+                single.lora_A.copy_(adapters[name][0])
+                single.lora_B.copy_(adapters[name][1])
+        else:
+            single.lora_B.data.zero_()
+        with torch.no_grad():
+            torch.testing.assert_close(out[i], single(x[i : i + 1])[0])
+
+
+def test_13_lr_schedule(lab):
+    lr = lambda t: lab.lr_at_step(t, 2e-4, 100, 1000, 2e-5)
+    assert lr(0) == pytest.approx(2e-6) and lr(49) == pytest.approx(1e-4) and lr(99) == pytest.approx(2e-4)
+    assert lr(100) == pytest.approx(2e-4), "peak right after warm-up"
+    assert lr(550) == pytest.approx(1.1e-4), "halfway through the decay"
+    assert lr(1000) == pytest.approx(2e-5) and lr(5000) == pytest.approx(2e-5), "floor at min_lr"
+    assert all(lr(t) >= lr(t + 1) for t in range(100, 999)), "monotone decay after warm-up"

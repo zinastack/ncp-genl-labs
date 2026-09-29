@@ -94,3 +94,10 @@ Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through ever
 | 6 | `sequence_logprob` | per-sequence log-likelihood |
 | 7 | `dpo_loss` | direct preference optimisation |
 | 8 | `train` | a minimal optimisation loop over trainable params only |
+| 9 | `nf4_quantize`, `nf4_dequantize` | QLoRA's 4-bit NormalFloat format, block-wise scales |
+| 10 | `SoftPrompt` | prompt tuning / p-tuning: trainable virtual tokens, frozen model |
+| 11 | `reward_model_loss`, `preference_accuracy` | the RLHF reward model (Bradley–Terry) |
+| 12 | `MultiLoRALinear` | multi-LoRA serving: one base model, per-request adapters |
+| 13 | `lr_at_step` | warm-up + cosine learning-rate schedule |
+
+Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`](SOLUTION.md).

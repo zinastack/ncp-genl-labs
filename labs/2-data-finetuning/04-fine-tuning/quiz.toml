@@ -315,3 +315,351 @@ reward model scores generations. The KL penalty to the reference model prevents 
 and loss of language quality. Tokenizers and retrieval indexes aren't part of it. PPO needs the
 critic. GRPO-style methods drop it, but that isn't classic PPO.
 """
+
+[[questions]]
+id = "04-17"
+topic = "NF4"
+question = "Why does QLoRA's NF4 data type use non-uniformly spaced quantization levels?"
+options = [
+  "Non-uniform levels are faster to decode on GPUs",
+  "Pre-trained weights are roughly normally distributed, so placing the 16 levels at normal-distribution quantiles puts more of them where most weights are (near zero), which lowers quantization error",
+  "Uniform levels cannot represent negative numbers",
+  "NF4 levels are learned during fine-tuning",
+]
+answer = ["B"]
+explanation = """
+With only 16 levels, spacing matters. NF4 levels are quantiles of a normal distribution (dense near
+0, sparse in the tails), matching the bell-shaped weights, so average error is lower than with 16
+evenly spaced levels at the same 4 bits. Speed isn't the motivation, uniform grids handle negative
+numbers fine, and the levels are fixed, not learned.
+"""
+
+[[questions]]
+id = "04-18"
+topic = "Double quantization"
+question = "In QLoRA, what does double quantization do?"
+options = [
+  "Quantizes the LoRA adapters to 4 bits as well",
+  "Quantizes activations and weights separately",
+  "Quantizes the per-block scaling constants (absmax values) themselves, saving roughly 0.37 bits per parameter",
+  "Runs quantization twice to reduce error",
+]
+answer = ["C"]
+explanation = """
+Each block of 64 weights stores a scale. At 32 bits that's 0.5 extra bits per weight. Quantizing
+those scales to 8 bits (with a second-level scale) cuts the overhead to about 0.13 bits, bringing
+the total to about 4.13 bits per weight. The adapters stay in bf16, activations aren't quantized,
+and running quantization twice would not reduce error.
+"""
+
+[[questions]]
+id = "04-19"
+topic = "QLoRA trade-offs"
+question = "Compared with LoRA on a bf16 base model, what is the typical effect of QLoRA?"
+options = [
+  "Much lower GPU memory for the frozen weights, but each training step is usually somewhat slower because weights are dequantized on the fly",
+  "Faster training steps and higher accuracy in all cases",
+  "Lower memory for the adapters only; the base model memory is unchanged",
+  "Identical memory, but the adapters become 4-bit",
+]
+answer = ["A"]
+explanation = """
+QLoRA stores the frozen base in 4-bit NF4 (about 4× smaller than bf16) and dequantizes blocks to
+bf16 for each matmul, which adds compute. It trades speed for memory. Accuracy is close to bf16
+LoRA but not guaranteed higher, and the adapters stay in bf16; the savings come from the base weights.
+"""
+
+[[questions]]
+id = "04-20"
+topic = "Paged optimizers"
+question = "What problem do the paged optimizers used in QLoRA address?"
+options = [
+  "They make the optimizer converge in fewer steps",
+  "They absorb short GPU-memory spikes (for example from long sequences) by moving optimizer state to CPU memory when needed, instead of crashing with out-of-memory errors",
+  "They store the optimizer state in 4-bit NF4",
+  "They split the optimizer across multiple GPUs",
+]
+answer = ["B"]
+explanation = """
+Paged optimizers use unified memory: when GPU memory runs short, optimizer pages are evicted to CPU
+RAM and brought back later, smoothing out spikes. They don't change convergence, store state in
+NF4, or shard across GPUs (that's ZeRO/FSDP, Lab 06).
+"""
+
+[[questions]]
+id = "04-21"
+topic = "PEFT methods"
+question = "Which description matches IA³ (Infused Adapter by Inhibiting and Amplifying Inner Activations)?"
+options = [
+  "It inserts small bottleneck MLP layers after each sub-layer",
+  "It learns low-rank matrices B·A added to the weights",
+  "It learns small vectors that rescale keys, values and FFN activations element-wise, training even fewer parameters than LoRA",
+  "It prepends trainable key/value vectors at every layer",
+]
+answer = ["C"]
+explanation = """
+IA³ multiplies activations by learned vectors, so its trainable parameters are only a few per
+layer (about 0.01% of the model). Bottleneck MLPs are Houlsby adapters, B·A is LoRA, and
+per-layer key/value vectors are prefix tuning.
+"""
+
+[[questions]]
+id = "04-22"
+topic = "Adapter latency"
+question = """
+Which PEFT method adds inference latency that cannot be removed by merging, because it inserts new
+layers into the forward pass?
+"""
+options = [
+  "LoRA",
+  "DoRA",
+  "Full fine-tuning",
+  "Houlsby-style bottleneck adapters",
+]
+answer = ["D"]
+explanation = """
+Bottleneck adapters are extra small networks placed in sequence after sub-layers, so every token
+must pass through them and they can't be folded into existing weights. LoRA and DoRA updates are
+matrices of the same shape as W and can be merged for zero overhead. Full fine-tuning adds no
+layers.
+"""
+
+[[questions]]
+id = "04-23"
+topic = "DoRA"
+question = "How does DoRA (Weight-Decomposed Low-Rank Adaptation) differ from LoRA?"
+options = [
+  "It decomposes each weight into a magnitude and a direction, trains the magnitude directly and applies a LoRA update to the direction",
+  "It uses 4-bit quantization for the base model",
+  "It trains only the embedding layer",
+  "It removes the need for a rank hyperparameter",
+]
+answer = ["A"]
+explanation = """
+DoRA separates how large a weight vector is from where it points, which makes low-rank updates
+behave more like full fine-tuning. It can still be merged after training. 4-bit bases are QLoRA,
+embedding-only training is a different technique, and DoRA still has a LoRA rank.
+"""
+
+[[questions]]
+id = "04-24"
+topic = "Prefix tuning"
+question = "What distinguishes prefix tuning from prompt tuning?"
+options = [
+  "Prefix tuning trains all model weights",
+  "Prefix tuning learns key/value vectors prepended at every transformer layer, while prompt tuning learns embeddings only at the input",
+  "Prefix tuning only works with encoder models",
+  "Prompt tuning requires more trainable parameters than prefix tuning",
+]
+answer = ["B"]
+explanation = """
+Prompt tuning adds soft tokens to the input embedding sequence only. Prefix tuning injects learned
+vectors into the attention keys and values of every layer, which gives more influence (and more
+parameters). Both keep the model frozen, and prefix tuning was designed for generation models.
+"""
+
+[[questions]]
+id = "04-25"
+topic = "Reward model"
+question = "A reward model for RLHF is trained on pairs of (chosen, rejected) answers. What does it learn?"
+options = [
+  "To generate the chosen answer token by token",
+  "The exact probability that a human will click on an answer",
+  "To classify answers into fixed quality categories",
+  "A scalar score such that chosen answers score higher than rejected ones, trained so that σ(r_chosen − r_rejected) is large (Bradley–Terry)",
+]
+answer = ["D"]
+explanation = """
+The reward model outputs one number per (prompt, answer). The pairwise loss only constrains
+differences, so the scale is arbitrary, which is why RLHF adds a KL penalty and why reward
+normalisation is common. It doesn't generate text, isn't calibrated to click probabilities, and
+isn't trained on fixed categories.
+"""
+
+[[questions]]
+id = "04-26"
+topic = "Reward hacking"
+question = """
+During PPO-based RLHF, the policy's reward keeps rising while human raters find answers getting
+longer, repetitive and sycophantic. What is happening, and which mechanism limits it?
+"""
+options = [
+  "Reward hacking: the policy exploits flaws in the reward model; the KL penalty toward the reference (SFT) model keeps it from drifting too far",
+  "Catastrophic forgetting; fix it with a higher learning rate",
+  "Underfitting of the reward model; fix it by removing the reference model",
+  "Tokenizer mismatch; fix it by retraining the tokenizer",
+]
+answer = ["A"]
+explanation = """
+A reward model is an imperfect proxy, and an optimiser will find its blind spots (length,
+flattery). The KL term penalises distribution shift from the reference model, and better or
+ensembled reward models help too. A higher learning rate or removing the reference makes drift
+worse, and the tokenizer is unrelated.
+"""
+
+[[questions]]
+id = "04-27"
+topic = "DPO beta"
+question = "In DPO, what is the effect of increasing β?"
+options = [
+  "It changes which answers are labelled as chosen",
+  "It increases the learning rate of the reference model",
+  "It sharpens the loss with respect to the preference margin, which strengthens the implicit KL constraint so the policy stays closer to the reference",
+  "It disables the reference model",
+]
+answer = ["C"]
+explanation = """
+β scales the log-probability ratios inside the sigmoid. It plays the role of the KL coefficient in
+the RLHF objective: larger β corresponds to a stronger pull toward the reference. With larger β the
+loss saturates at smaller policy changes (at a margin of 4, the loss is 0.513 with β = 0.1 but 0.127
+with β = 0.5). The labels come from the data, and the reference model is frozen and always used.
+"""
+
+[[questions]]
+id = "04-28"
+topic = "SteerLM"
+question = "What is distinctive about NVIDIA's SteerLM alignment technique?"
+options = [
+  "It removes the need for any labelled data",
+  "It trains the model conditioned on attribute labels (such as helpfulness or verbosity), so users can adjust those attributes at inference time",
+  "It is a quantization method",
+  "It replaces the tokenizer with a steerable one",
+]
+answer = ["B"]
+explanation = """
+SteerLM uses attribute-annotated data and conditions generation on the desired attribute values,
+so behaviour can be steered per request instead of being fixed by one reward. It still needs
+attribute labels (often from an attribute prediction model), and it isn't quantization or tokenization.
+"""
+
+[[questions]]
+id = "04-29"
+topic = "Warm-up"
+question = """
+Full fine-tuning of a 13B model diverges (loss spikes to NaN) in the first 50 steps at learning
+rate 2e-5 with no warm-up. What is the most appropriate first change?
+"""
+options = [
+  "Add a learning-rate warm-up (for example linear over the first few hundred steps) before the cosine decay",
+  "Increase the learning rate to 2e-4",
+  "Remove gradient clipping",
+  "Train for more epochs",
+]
+answer = ["A"]
+explanation = """
+Early in training, Adam's moment estimates are unreliable and the first updates can be large.
+Ramping the learning rate up over a few hundred steps is the standard stabiliser, often combined
+with gradient clipping. A 10× higher rate makes divergence worse, removing clipping removes a
+safety net, and more epochs don't fix instability in the first steps.
+"""
+
+[[questions]]
+id = "04-30"
+topic = "Overfitting"
+question = """
+During SFT, training loss keeps falling, but validation loss starts rising after epoch 2 and the
+model repeats training answers verbatim. What should you do?
+"""
+options = [
+  "Train for more epochs until validation loss falls again",
+  "Remove the validation set",
+  "Increase the LoRA rank",
+  "Stop at the best validation checkpoint (early stopping) and consider more diverse data or regularisation (dropout, fewer epochs)",
+]
+answer = ["D"]
+explanation = """
+Rising validation loss with falling training loss is overfitting, and the verbatim answers show
+memorisation. Keep the checkpoint with the best validation score and reduce the pressure to memorise.
+More epochs or more rank increase overfitting, and without a validation set you can't see it at all.
+"""
+
+[[questions]]
+id = "04-31"
+topic = "LoRA scaling"
+question = "In LoRA, the update is scaled by α / r. Why?"
+options = [
+  "To make the update larger for larger ranks",
+  "To keep the effective magnitude of the update roughly stable when r changes, so learning-rate settings transfer between ranks",
+  "To normalise the adapter weights to unit length",
+  "To make the adapter output zero at initialisation",
+]
+answer = ["B"]
+explanation = """
+Larger r means more terms in B·A, which tends to increase the update's size. Dividing by r
+compensates, and α sets the overall strength (α = r or 2r are common). Zero output at
+initialisation comes from B = 0, not from the scaling, and the adapter weights are not unit-normalised.
+"""
+
+[[questions]]
+id = "04-32"
+topic = "Knowledge vs behaviour"
+question = """
+A company wants its assistant to know product prices that change daily. An engineer proposes
+daily LoRA fine-tuning on the new price list. What is the better approach, and why?
+"""
+options = [
+  "Daily full fine-tuning, because LoRA can't learn prices",
+  "Increase the LoRA rank so it memorises prices better",
+  "Keep prices out of the weights: retrieve them at query time (RAG or a tool/API call), because fine-tuning is slow to update, unreliable for exact facts, and can cause forgetting",
+  "Put all prices in the system prompt of a model fine-tuned once",
+]
+answer = ["C"]
+explanation = """
+Fine-tuning is good at behaviour and style but unreliable for precise, fast-changing facts. It
+needs a training run per change and risks hallucinated or outdated numbers. Retrieval or tool use
+fetches the current value with a source. A bigger rank doesn't make memorisation reliable, and a
+long price list in every prompt is costly and still becomes stale.
+"""
+
+[[questions]]
+id = "04-33"
+topic = "NeMo Customizer"
+question = "What is NVIDIA NeMo Customizer?"
+options = [
+  "A tokenizer training tool",
+  "A GPU driver extension",
+  "A vector database for RAG",
+  "A microservice that exposes an API for running fine-tuning jobs (for example LoRA or full SFT) on supported models, as part of NeMo microservices",
+]
+answer = ["D"]
+explanation = """
+NeMo Customizer packages model customization as a service: you submit a dataset and a
+configuration, and it runs the fine-tuning job, producing adapters or checkpoints to serve with NIM.
+It isn't a tokenizer tool, a driver or a database (NeMo Retriever and partner vector databases fill that role).
+"""
+
+[[questions]]
+id = "04-34"
+topic = "Alignment pipeline"
+question = "In the usual LLM alignment pipeline, in what order are these stages applied?"
+options = [
+  "Pre-training, then supervised fine-tuning (instruction tuning), then preference alignment (RLHF or DPO)",
+  "Preference alignment, then pre-training, then SFT",
+  "SFT, then pre-training, then DPO",
+  "DPO only; the other stages are optional",
+]
+answer = ["A"]
+explanation = """
+Pre-training builds general knowledge from raw text. SFT teaches the model to follow instructions
+in the target format. Preference alignment then refines which of the model's possible answers humans
+prefer, and DPO or PPO both start from the SFT model as the reference. Preference methods need a
+capable instruction-following model to start from.
+"""
+
+[[questions]]
+id = "04-35"
+topic = "Instruction tuning"
+question = "What does instruction tuning (supervised fine-tuning on instruction–response pairs) mainly give a pre-trained base model?"
+options = [
+  "Large amounts of new factual knowledge",
+  "The ability to follow natural-language instructions in a conversational format, which also makes zero-shot prompting work",
+  "A smaller parameter count",
+  "Immunity to prompt injection",
+]
+answer = ["B"]
+explanation = """
+A base model only continues text. Instruction tuning on many tasks phrased as instructions teaches
+it to treat the prompt as a request and answer it, which is why instruct models do well zero-shot.
+Knowledge mostly comes from pre-training, parameters are unchanged, and instruction-tuned models
+remain vulnerable to injection (guardrails, Lab 10).
+"""
