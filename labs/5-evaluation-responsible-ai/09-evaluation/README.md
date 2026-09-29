@@ -84,3 +84,9 @@ Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through ever
 | 7 | `paired_bootstrap` | confidence interval for a model difference |
 | 8 | `cohens_kappa` | judge–human agreement |
 | 9 | `macro_f1`, `slice_accuracy` | error analysis |
+| 10 | `pairwise_judge` | position-debiased LLM-as-a-judge |
+| 11 | `faithfulness` | RAG groundedness: share of claims supported by the context |
+| 12 | `mcq_predictions` | how lm-evaluation-harness scores multiple choice (acc vs acc_norm) |
+| 13 | `regression_gate` | continuous evaluation: blocking releases on metric regressions |
+
+Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`](SOLUTION.md).

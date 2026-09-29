@@ -230,3 +230,226 @@ MRR rewards placing the first relevant item near rank 1, and nDCG weighs graded 
 position. Both are position-sensitive, which is what reranking changes. Recall@100 barely moves
 when items are reordered within the top 100. BLEU and perplexity aren't ranking metrics.
 """
+
+[[questions]]
+id = "09-13"
+topic = "LLM-as-judge bias"
+question = """
+A pairwise LLM judge picks the answer shown first 70% of the time, whichever model produced it.
+What is the standard mitigation?
+"""
+options = [
+  "Use a larger temperature for the judge",
+  "Judge each pair twice with the answer order swapped, and count only verdicts that stay consistent (treat inconsistent ones as ties)",
+  "Always show the new model's answer first",
+  "Replace pairwise comparison with BLEU",
+]
+answer = ["B"]
+explanation = """
+This is position bias. Swapping the order and requiring agreement removes verdicts driven by the
+slot rather than the content. More randomness doesn't remove the bias, fixing the order bakes it
+in, and BLEU doesn't measure open-ended quality.
+"""
+
+[[questions]]
+id = "09-14"
+topic = "Faithfulness"
+question = "In RAG evaluation, what does faithfulness (groundedness) measure?"
+options = [
+  "Whether the retriever found all relevant documents",
+  "How fluent the answer is",
+  "The fraction of the answer's claims that are supported by the retrieved context",
+  "How fast the answer was generated",
+]
+answer = ["C"]
+explanation = """
+Faithfulness checks the generation step: claims not supported by the provided context are
+hallucinations, even if fluent. Retrieval completeness is recall@k, fluency is a separate quality
+dimension, and speed is latency.
+"""
+
+[[questions]]
+id = "09-15"
+topic = "Benchmark scoring"
+question = """
+In lm-evaluation-harness, a multiple-choice task reports both acc and acc_norm. What is the difference?
+"""
+options = [
+  "acc uses the total log-likelihood of each option; acc_norm normalises it by the option's length so longer options aren't penalised just for having more tokens",
+  "acc_norm is accuracy after removing hard questions",
+  "acc is for base models and acc_norm is for chat models",
+  "acc_norm averages over several random seeds",
+]
+answer = ["A"]
+explanation = """
+The harness scores each option's text by log-likelihood and picks the highest. Longer options sum
+more negative log-probabilities, so acc_norm divides by length (characters or tokens depending on
+the task). It removes no questions, applies to any model, and isn't a seed average.
+"""
+
+[[questions]]
+id = "09-16"
+topic = "Evaluation reproducibility"
+question = """
+Two teams report different MMLU scores for the same model (65.2 vs 69.8). Which differences most
+likely explain this? (Select TWO.)
+"""
+options = [
+  "Different prompt formats or numbers of few-shot examples",
+  "Different scoring methods (log-likelihood of options vs generating and parsing a letter, acc vs acc_norm)",
+  "The GPU brand used for evaluation",
+  "The time of day the evaluation ran",
+  "The size of the evaluation server's disk",
+]
+answer = ["A", "B"]
+explanation = """
+Benchmark scores are sensitive to the prompt template, few-shot count, and how answers are
+extracted or scored. Reports must fix and state these to be comparable. Hardware, time of day and
+disk size don't change the model's predictions, apart from negligible numerical differences.
+"""
+
+[[questions]]
+id = "09-17"
+topic = "Regression testing"
+question = """
+A new prompt template improves the average helpfulness score but slightly lowers the safety pass
+rate on the red-team suite. Under a zero-tolerance gate for safety metrics, what happens?
+"""
+options = [
+  "It ships, because the average score went up",
+  "It ships to 50% of users",
+  "The release is blocked until the safety regression is fixed; improvements on one metric don't offset a gated regression on another",
+  "The safety suite is removed",
+]
+answer = ["C"]
+explanation = """
+Regression gates check each tracked metric against its own tolerance. Safety metrics usually allow
+no drop at all, so any regression fails the gate. Averaging would let a safety loss hide behind a
+helpfulness gain. Partial rollouts and deleting tests defeat the gate.
+"""
+
+[[questions]]
+id = "09-18"
+topic = "Human evaluation"
+question = "When is human evaluation still necessary even though automatic metrics and LLM judges exist?"
+options = [
+  "Never; LLM judges have replaced humans",
+  "Only for measuring latency",
+  "Only for code generation",
+  "To calibrate and validate automatic judges (agreement checks), for high-stakes or subjective quality decisions, and to create preference data",
+]
+answer = ["D"]
+explanation = """
+LLM judges are only trustworthy after their agreement with humans has been checked (Cohen's κ on
+a sample). Final decisions on subjective or high-stakes quality, and preference datasets for RLHF
+or DPO, still rely on people. Latency is measured automatically, and code is judged by tests.
+"""
+
+[[questions]]
+id = "09-19"
+topic = "Retrieval metrics"
+question = """
+You add a cross-encoder reranker that reorders the top-20 retrieved passages. Which metric will
+NOT change, by construction?
+"""
+options = [
+  "MRR",
+  "Precision@1",
+  "Recall@20 (over the same 20 candidates)",
+  "nDCG@5",
+]
+answer = ["C"]
+explanation = """
+Reranking changes the order of the same 20 passages, so the set of relevant items among the 20, and
+therefore recall@20, is fixed. Position-sensitive metrics (MRR, P@1, nDCG@5) are exactly what
+reranking should improve.
+"""
+
+[[questions]]
+id = "09-20"
+topic = "Calibration of evaluation"
+question = """
+Model A beats Model B on 3 of 5 benchmarks, each with a few hundred items and differences under one
+point. What is the most defensible conclusion?
+"""
+options = [
+  "Model A is better overall",
+  "Model B is better overall",
+  "The results are inconclusive until uncertainty is quantified (confidence intervals or paired tests per benchmark); differences under a point on a few hundred items are often within noise",
+  "The benchmarks are broken",
+]
+answer = ["C"]
+explanation = """
+With a few hundred items, sampling noise is often larger than a point, so counting wins over tiny
+differences isn't evidence. Report intervals and test significance. Nothing suggests the
+benchmarks are broken.
+"""
+
+[[questions]]
+id = "09-21"
+topic = "Perplexity"
+question = "A team lowers validation perplexity on legal text from 12 to 8 through domain-adaptive pre-training. What can they conclude?"
+options = [
+  "The model predicts legal text better, but task performance (for example contract Q&A accuracy) must be measured separately",
+  "Contract Q&A accuracy improved by 33%",
+  "The model has fewer hallucinations",
+  "The model will perform better on all benchmarks",
+]
+answer = ["A"]
+explanation = """
+Lower perplexity means better next-token prediction on that domain, which is a good sign for
+domain adaptation. It doesn't translate directly into accuracy on downstream tasks, factuality or
+general benchmarks, and general skills can even degrade (forgetting). Evaluate the target tasks.
+"""
+
+[[questions]]
+id = "09-22"
+topic = "Evaluation data"
+question = "Which practices keep an evaluation set trustworthy over time? (Select TWO.)"
+options = [
+  "Keep a held-out test set that is never used for tuning prompts or hyperparameters",
+  "Deduplicate and decontaminate against training data, and refresh or extend it as production traffic changes",
+  "Add the test set to the fine-tuning data to improve scores",
+  "Tune the prompt until the test score stops improving",
+  "Delete failing examples from the test set",
+]
+answer = ["A", "B"]
+explanation = """
+Tuning on the test set turns it into training data, so scores stop measuring generalisation. It
+must stay separate, clean of overlap with training data, and representative of current usage.
+Training on it, tuning to it, or deleting hard cases all inflate scores without improving the model.
+"""
+
+[[questions]]
+id = "09-23"
+topic = "Judge rubric"
+question = "Which design makes LLM-as-judge scores most consistent and meaningful?"
+options = [
+  "Ask the judge 'Is this good?' with no further guidance",
+  "A clear rubric with defined criteria and anchored score levels (examples of what each score means), asking for reasoning before the score",
+  "Letting the judge choose its own scale for each answer",
+  "Using the highest temperature available",
+]
+answer = ["B"]
+explanation = """
+Anchored rubrics make the judge apply the same standard to every item, and reasoning before the
+score improves reliability. Vague prompts, changing scales and high temperature all increase
+inconsistency.
+"""
+
+[[questions]]
+id = "09-24"
+topic = "Code evaluation"
+question = "Why is BLEU a poor primary metric for code generation, and what is used instead?"
+options = [
+  "BLEU is too slow; use ROUGE instead",
+  "BLEU only works for English; use perplexity instead",
+  "BLEU rewards long programs; use program length instead",
+  "Many correct programs differ textually from the reference, and small textual differences can break code; execution-based metrics such as pass@k with unit tests are used instead",
+]
+answer = ["D"]
+explanation = """
+Code correctness is functional. Two different implementations can both pass, and a one-character
+change can break a program that scores high on n-gram overlap. HumanEval and MBPP run unit tests
+and report pass@k. ROUGE, perplexity and length don't measure functional correctness.
+"""

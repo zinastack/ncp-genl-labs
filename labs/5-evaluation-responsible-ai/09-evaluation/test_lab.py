@@ -87,3 +87,34 @@ def test_9_error_analysis(lab):
         + [{"lang": "sw", "correct": False}] * 3 + [{"lang": "sw", "correct": True}] \
         + [{"lang": "fr", "correct": True}] * 3 + [{"lang": "fr", "correct": False}]
     assert lab.slice_accuracy(records, "lang") == [("sw", 0.25, 4), ("fr", 0.75, 4), ("en", 0.9, 10)]
+
+
+def test_10_pairwise_judge(lab):
+    prefers_longer = lambda q, first, second: "1" if len(first) > len(second) else "2"
+    always_first = lambda q, first, second: "1"
+    assert lab.pairwise_judge(prefers_longer, "q", "a detailed answer", "short") == "A"
+    assert lab.pairwise_judge(prefers_longer, "q", "short", "a detailed answer") == "B"
+    assert lab.pairwise_judge(always_first, "q", "x", "y") == "tie", "position bias is caught by swapping"
+
+
+def test_11_faithfulness(lab):
+    supports = lambda claim, ctx: claim.lower() in ctx.lower()
+    ctx = "ZeRO-3 shards parameters, gradients and optimizer states."
+    assert lab.faithfulness(["zero-3 shards parameters", "zero-3 was invented in 1999"], ctx, supports) == 0.5
+    assert lab.faithfulness([], ctx, supports) == 1.0
+
+
+def test_12_mcq(lab):
+    logps = [[-6.0, -9.0, -5.5], [-2.0, -4.0, -3.0]]
+    lengths = [[2, 6, 1], [1, 4, 3]]
+    assert lab.mcq_predictions(logps, lengths, normalize=False) == [2, 0], "raw likelihood favours short options"
+    assert lab.mcq_predictions(logps, lengths, normalize=True) == [1, 1], "per-token: -1.5 beats -3 and -5.5"
+
+
+def test_13_regression_gate(lab):
+    base = {"faithfulness": 0.91, "rougeL": 0.41, "safety_pass": 0.99}
+    ok, failed = lab.regression_gate(base, {"faithfulness": 0.90, "rougeL": 0.35, "safety_pass": 0.99},
+                                     {"faithfulness": 0.02, "rougeL": 0.03, "safety_pass": 0.0})
+    assert (ok, failed) == (False, ["rougeL"])
+    assert lab.regression_gate(base, dict(base, safety_pass=0.98), {"safety_pass": 0.0}) == (False, ["safety_pass"])
+    assert lab.regression_gate(base, base, {"rougeL": 0.0}) == (True, [])

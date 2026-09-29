@@ -7,6 +7,7 @@ import math
 import re
 import string
 from collections import Counter
+from collections.abc import Callable
 
 import numpy as np
 
@@ -111,5 +112,39 @@ def slice_accuracy(records: list[dict], key: str) -> list[tuple[str, float, int]
     """Group records (each has `key` and a boolean "correct") by record[key].
     Return [(group, accuracy, count)] sorted by accuracy ASCENDING (worst slice first),
     ties broken by group name.
+    """
+    raise NotImplementedError
+
+
+# 10 ────────────────────────────────────────────────────────────────────────────
+def pairwise_judge(judge: Callable[[str, str, str], str], question: str, answer_a: str, answer_b: str) -> str:
+    """Position-debiased pairwise LLM-as-judge. judge(question, first, second) returns "1" or "2"
+    (which shown answer is better). Call it twice: (a, b) and (b, a).
+    Consistent preference for a → "A"; for b → "B"; anything else → "tie".
+    """
+    raise NotImplementedError
+
+
+# 11 ────────────────────────────────────────────────────────────────────────────
+def faithfulness(claims: list[str], context: str, supports: Callable[[str, str], bool]) -> float:
+    """RAG faithfulness: fraction of the answer's claims for which supports(claim, context) is True.
+    No claims → 1.0.
+    """
+    raise NotImplementedError
+
+
+# 12 ────────────────────────────────────────────────────────────────────────────
+def mcq_predictions(choice_logprobs: list[list[float]], choice_lengths: list[list[int]], normalize: bool) -> list[int]:
+    """Log-likelihood multiple-choice scoring (lm-evaluation-harness). For each question pick the
+    index of the choice with the highest score: its total log-probability (acc), or with
+    normalize=True that total divided by the choice's length (acc_norm).
+    """
+    raise NotImplementedError
+
+
+# 13 ────────────────────────────────────────────────────────────────────────────
+def regression_gate(baseline: dict[str, float], candidate: dict[str, float], max_drop: dict[str, float]) -> tuple[bool, list[str]]:
+    """Release gate. For each metric in max_drop (in that order) the candidate fails it if
+    baseline − candidate > the allowed drop. Return (passed, failed metric names).
     """
     raise NotImplementedError

@@ -7,6 +7,7 @@ import math
 import re
 import string
 from collections import Counter, defaultdict
+from collections.abc import Callable
 
 import numpy as np
 
@@ -145,3 +146,39 @@ def slice_accuracy(records: list[dict], key: str) -> list[tuple[str, float, int]
         groups[r[key]].append(bool(r["correct"]))
     rows = [(g, sum(v) / len(v), len(v)) for g, v in groups.items()]
     return sorted(rows, key=lambda row: (row[1], str(row[0])))  # worst slice first
+
+
+def pairwise_judge(judge: Callable[[str, str, str], str], question: str, answer_a: str, answer_b: str) -> str:
+    # Ask twice with the positions swapped. judge(q, first, second) returns "1" or "2".
+    first = judge(question, answer_a, answer_b)   # A shown first
+    second = judge(question, answer_b, answer_a)  # B shown first
+    if first == "1" and second == "2":
+        return "A"
+    if first == "2" and second == "1":
+        return "B"
+    return "tie"  # the verdict followed the POSITION, not the content: position bias, don't count it
+
+
+def faithfulness(claims: list[str], context: str, supports: Callable[[str, str], bool]) -> float:
+    # RAG groundedness: the share of the answer's claims that the retrieved context supports.
+    # `supports` is an NLI model or an LLM judge in practice.
+    if not claims:
+        return 1.0
+    return sum(supports(claim, context) for claim in claims) / len(claims)
+
+
+def mcq_predictions(choice_logprobs: list[list[float]], choice_lengths: list[list[int]], normalize: bool) -> list[int]:
+    # How lm-evaluation-harness scores multiple choice: the model "answers" with the option whose
+    # text it finds most likely. acc uses the total log-likelihood; acc_norm divides by length,
+    # so long options aren't penalised just for having more tokens.
+    preds = []
+    for logps, lengths in zip(choice_logprobs, choice_lengths):
+        scores = [lp / n for lp, n in zip(logps, lengths)] if normalize else logps
+        preds.append(int(np.argmax(scores)))
+    return preds
+
+
+def regression_gate(baseline: dict[str, float], candidate: dict[str, float], max_drop: dict[str, float]) -> tuple[bool, list[str]]:
+    # CI for models and prompts: block the release if any tracked metric fell more than allowed.
+    failures = [m for m, tolerance in max_drop.items() if baseline[m] - candidate[m] > tolerance]
+    return not failures, failures
