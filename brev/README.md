@@ -21,10 +21,43 @@ Brev's instance picker. **Stop the instance when you're done.** Disk: 100 GB (mo
 > T4 notes: no bf16 (the labs switch to fp16 automatically), no FlashAttention-2, no FP8.
 > Everything still runs, and the differences are themselves exam material.
 
+## Private instances from your laptop (Brev CLI, no GitHub needed)
+
+The fastest private path: the root Makefile's `brev-*` targets (in `brev/brev.mk`) create an
+instance **in your own Brev org**, copy your **local** repo to it (tracked and untracked files, nothing
+git-ignored, so your filled-in exercises come along), copy your Hugging Face token if one is set,
+and run `brev/setup.sh`. Nobody else can see or use these instances.
+
+```bash
+brev login                       # once
+make brev-plan S=3               # preview the GPU types that would be tried (free)
+make brev-up S=3                 # create + copy repo + setup (billing starts)
+make brev-shell S=3              # work on it (or: make brev-open S=3 for VS Code)
+make brev-exec S=3 CMD=gpu-06    # or run a target remotely
+make brev-sync S=3               # push local edits again
+make brev-forward S=4 PORT=3000  # Grafana on http://localhost:3000 (PORT=9090 for Prometheus)
+make brev-get S=3 FILE=labs/3-optimization-acceleration/06-gpu-acceleration/ddp_profile.nsys-rep
+make brev-stop S=3               # stop billing for compute (disk kept); make brev-delete S=3 to remove
+```
+
+Defaults per section (cheapest first, falling back to the next type if one isn't available):
+1× L4 for Sections 1, 2 and 5, 2× L4 then 2× T4 for Section 3, 1× T4 for Section 4. Override with
+`TYPE=<brev type>` (see `brev search gpu`) or `INSTANCE=<name>`. `brev create` doesn't take a disk
+size. If a type's default disk turns out too small for models and Docker images, pick a type with a
+larger disk (`brev search gpu --min-disk 100`).
+
 ## Create the Launchables (one per section)
 
-Push this repo to GitHub first (public, or grant Brev access), then set `REPO_URL` in
-`brev/setup.sh` to its URL. In the Brev console, **Launchables → Create Launchable**:
+Brev's CLI can **deploy** a Launchable (`make brev-launch S=3 LAUNCHABLE=env-...`) but can't
+**create** one: that happens in the web console's Launchable builder. Two things to know:
+
+- **Keep it private:** set visibility to **"Only my organization"**. New Launchables default to
+  **"Anyone with the link"**; the third option, "Everyone (published)", lists it publicly.
+- **Code source:** Brev's docs describe a **public** Git repository URL as the code source. Until you
+  publish the repo, use the CLI path above.
+
+When the repo is on GitHub, set `REPO_URL` in `brev/setup.sh` to its URL. In the Brev console,
+**Launchables → Create Launchable**:
 
 | Field | Value |
 |---|---|

@@ -93,6 +93,8 @@ s3-%: ; @$(MAKE) --no-print-directory -C labs/$(word 3,$(SECTIONS)) $*
 s4-%: ; @$(MAKE) --no-print-directory -C labs/$(word 4,$(SECTIONS)) $*
 s5-%: ; @$(MAKE) --no-print-directory -C labs/$(word 5,$(SECTIONS)) $*
 
+include brev/brev.mk
+
 clean: ## Remove caches and generated notebooks/results
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +
 	rm -rf .pytest_cache labs/*/*/gpu_lab.ipynb labs/*/*/results labs/*/*/traces

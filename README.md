@@ -60,6 +60,7 @@ The root `Makefile` is the entry point. Each section has its own `labs/<section>
 | `make s<N>-<target>` | run any Section N target, e.g. `make s3-profile-06`, `make s4-triton-up`, `make s5-lm-eval` |
 | `make setup-gpu SECTION=3` | install one section's GPU packages (`all` by default) |
 | `make brev-setup SECTION=3` | full instance setup (what the Brev Launchable runs) |
+| `make brev-up S=3` / `brev-shell` / `brev-stop` | private Brev GPU instance from your laptop via the Brev CLI (see [brev/README.md](brev/README.md)) |
 
 Or work inside a section: `cd labs/3-optimization-acceleration && make help`.
 

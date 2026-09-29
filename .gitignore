@@ -11,3 +11,4 @@ labs/*/*/results/
 labs/*/*/traces/
 *.nsys-rep
 *.sqlite
+.brev-genl-labs.tgz
