@@ -199,3 +199,393 @@ especially for multilingual and code data. The cost is embedding and output-laye
 softmax becomes more expensive, not cheaper. Layer count and head dimension are independent of
 vocabulary size.
 """
+
+[[questions]]
+id = "01-11"
+topic = "Causal mask"
+question = """
+During pre-training of a decoder-only LLM, a whole 2,048-token sequence is processed in one
+forward pass, and a next-token loss is computed at every position. What prevents position 100
+from simply reading token 101, which it is supposed to predict?
+"""
+options = [
+  "The padding mask, which hides tokens that come after the current one",
+  "Dropout on the attention weights",
+  "A causal (lower-triangular) attention mask that sets scores for future positions to -inf before softmax",
+  "The positional encoding, which tells the model not to look ahead",
+]
+answer = ["C"]
+explanation = """
+The causal mask blocks every key position greater than the query position, so each position can
+only use the past, even though all positions are computed in parallel (teacher forcing). A padding
+mask only hides filler tokens, and dropout only randomly zeroes weights. Positional encodings say
+where tokens are, not which ones are visible.
+"""
+
+[[questions]]
+id = "01-12"
+topic = "Architecture families"
+question = """
+A developer tries to use a pre-trained BERT-base model to write product descriptions token by
+token, and the output is incoherent. What is the most fundamental reason?
+"""
+options = [
+  "BERT's vocabulary is too small for product names",
+  "BERT was pre-trained bidirectionally with masked-language modelling, not to predict the next token from only the preceding tokens",
+  "BERT uses post-norm instead of pre-norm",
+  "BERT's maximum context of 512 tokens is too short for a description",
+]
+answer = ["B"]
+explanation = """
+Encoder-only models see both sides of every token during pre-training (no causal mask) and learn to
+fill in blanks. Autoregressive generation needs a model trained to predict the next token from the
+past only, which is a decoder. Vocabulary, norm placement and a 512-token limit aren't what makes
+generation fail; a description fits easily in 512 tokens.
+"""
+
+[[questions]]
+id = "01-13"
+topic = "Cross-attention"
+question = "In the cross-attention layer of an encoder-decoder transformer (for example T5), where do the queries, keys and values come from?"
+options = [
+  "Queries, keys and values all come from the encoder output",
+  "Queries from the encoder output; keys and values from the decoder",
+  "Queries, keys and values all come from the decoder's previous layer",
+  "Queries from the decoder; keys and values from the encoder output",
+]
+answer = ["D"]
+explanation = """
+Each output (decoder) token asks a question, the query, about the source sentence, whose encoded
+tokens provide the keys and values. That's how every generated word can consult the whole input.
+All three from the encoder is the encoder's own self-attention, and all three from the decoder is
+the decoder's self-attention. Reversing the roles would produce one output per source token, not per output token.
+"""
+
+[[questions]]
+id = "01-14"
+topic = "KV cache sizing"
+question = """
+A model has 32 layers, 8 key/value heads (grouped-query attention) and a head dimension of 128.
+Approximately how much KV-cache memory do 4 concurrent sequences of 8,192 tokens need in FP16?
+"""
+options = ["About 1 GiB", "About 4 GiB", "About 16 GiB", "About 64 GiB"]
+answer = ["B"]
+explanation = """
+2 (K and V) × 32 layers × 8 heads × 128 dims × 8,192 tokens × 4 sequences × 2 bytes =
+4,294,967,296 bytes = 4 GiB. About 1 GiB is a single sequence. About 16 GiB is what 32 KV heads
+(standard multi-head attention) would need, 4× more, which is exactly the saving GQA provides in
+this Llama-3-8B-like configuration.
+"""
+
+[[questions]]
+id = "01-15"
+topic = "MQA vs GQA"
+question = """
+Multi-query attention (MQA) uses a single key/value head shared by all query heads. Why have many
+recent models adopted grouped-query attention (GQA) instead?
+"""
+options = [
+  "GQA keeps most of MQA's KV-cache and bandwidth savings while recovering most of the quality lost by sharing one K/V head",
+  "GQA removes the KV cache entirely",
+  "GQA makes attention cost linear in sequence length",
+  "GQA is required for rotary position embeddings to work",
+]
+answer = ["A"]
+explanation = """
+GQA is a middle ground: a few K/V heads, each shared by a group of query heads. It cuts the cache
+several-fold (for example 8 KV heads for 64 query heads) with quality close to full multi-head
+attention, whereas MQA's single K/V head can hurt quality and training stability. The cache still
+exists, attention is still quadratic, and RoPE works with any of the three variants.
+"""
+
+[[questions]]
+id = "01-16"
+topic = "FlashAttention"
+question = "Which statements about FlashAttention are correct? (Select TWO.)"
+options = [
+  "It reduces the attention memory needed for activations from quadratic to linear in sequence length, because the full score matrix is never stored",
+  "It reduces the number of floating-point operations of attention from quadratic to linear",
+  "It uses an online softmax that rescales running sums block by block, so the result is exact",
+  "It trades a small amount of accuracy for speed by sparsifying the attention matrix",
+  "It only works for encoder models",
+]
+answer = ["A", "C"]
+explanation = """
+FlashAttention processes keys in tiles and keeps only running statistics (max, sum and weighted
+values), so memory grows linearly while the result stays exactly equal to standard attention. The
+FLOPs remain O(n²); the speed-up comes from far less memory traffic, not fewer operations.
+Sparse or approximate attention is a different family of methods, and FlashAttention is used in
+decoder LLM training and inference everywhere.
+"""
+
+[[questions]]
+id = "01-17"
+topic = "Attention cost"
+question = """
+You double the context length of a decoder LLM from 4k to 8k tokens and keep everything else the
+same. How does the compute of the attention score computation (QKᵀ) change compared with the
+feed-forward layers?
+"""
+options = [
+  "Both double",
+  "Attention scores double; the FFN quadruples",
+  "Attention scores quadruple; the FFN doubles",
+  "Both quadruple",
+]
+answer = ["C"]
+explanation = """
+QKᵀ compares every token with every other token, so its cost scales with n²: twice as many tokens
+means four times the work. The FFN processes each token independently, so it scales linearly and
+doubles. That is why long context is dominated by attention cost and memory, and why
+FlashAttention, GQA and paged KV caches matter at long lengths.
+"""
+
+[[questions]]
+id = "01-18"
+topic = "Number of heads"
+question = """
+A team changes a model from 16 attention heads to 32 heads, keeping d_model = 2048 fixed. What
+happens to the attention layer's parameter count?
+"""
+options = [
+  "It doubles, because there are twice as many heads",
+  "It halves, because each head is smaller",
+  "It stays the same: the Q, K, V and output projections are still d_model × d_model; each head just gets half the width (64 instead of 128)",
+  "It quadruples, because heads interact pairwise",
+]
+answer = ["C"]
+explanation = """
+Multi-head attention splits d_model across the heads. The projection matrices keep their
+d_model × d_model shape, so the parameters don't change; only head_dim = d_model / heads does.
+More heads means more, narrower attention patterns, not a bigger model.
+"""
+
+[[questions]]
+id = "01-19"
+topic = "Positional encoding"
+question = """
+A model uses learned absolute position embeddings with a maximum of 2,048 positions. You need it to
+handle 8,192-token inputs. What is the core problem?
+"""
+options = [
+  "There are no trained embedding vectors for positions beyond 2,048, so the model cannot represent those positions without architectural changes and further training",
+  "The causal mask cannot be built for more than 2,048 tokens",
+  "The vocabulary must be enlarged to four times its size",
+  "Learned position embeddings make attention cost exponential in length",
+]
+answer = ["A"]
+explanation = """
+A learned absolute scheme is a lookup table with one trained row per position, and rows 2,049 and
+beyond don't exist. Rotary embeddings (with rope scaling) or ALiBi handle position as a function of
+distance, which is why they are preferred for long-context models. Masks can be built for any
+length, vocabulary is unrelated, and attention cost is quadratic, not exponential.
+"""
+
+[[questions]]
+id = "01-20"
+topic = "Context extension"
+question = """
+You want to extend a Llama-style model (RoPE) trained at 4k context to 32k tokens with limited
+compute. Which approach is the standard one?
+"""
+options = [
+  "Retrain the model from scratch with learned absolute position embeddings",
+  "Apply RoPE scaling (for example NTK-aware or YaRN), then fine-tune briefly on long sequences",
+  "Remove the positional encoding so the model is not limited by length",
+  "Increase the number of attention heads by 8×",
+]
+answer = ["B"]
+explanation = """
+Because RoPE encodes position as rotation angles, rescaling those angles lets positions up to 32k
+map into a range similar to what the model saw in training, and a short long-context fine-tune
+adapts it. This is how many 32k–128k models are produced. Learned absolute embeddings can't
+extrapolate. Removing position information destroys word order, and head count doesn't set context length.
+"""
+
+[[questions]]
+id = "01-21"
+topic = "ALiBi"
+question = "How does ALiBi (Attention with Linear Biases) encode position?"
+options = [
+  "It rotates query and key vectors by position-dependent angles",
+  "It adds a sinusoidal vector to each token embedding",
+  "It adds a learned vector per position to the input",
+  "It subtracts a penalty proportional to the query–key distance from the attention scores, with no position embeddings",
+]
+answer = ["D"]
+explanation = """
+ALiBi biases each attention score by −m·distance, with a fixed slope m per head, so nearby tokens
+are favoured. It has no position embeddings at all and extrapolates well to longer inputs (BLOOM
+and MPT use it). Rotation describes RoPE, the sinusoidal vector is the original Transformer's
+scheme, and the learned vector is GPT-2/BERT's absolute scheme.
+"""
+
+[[questions]]
+id = "01-22"
+topic = "Normalisation"
+question = "Why do transformers use LayerNorm or RMSNorm rather than BatchNorm?"
+options = [
+  "They normalise each token's feature vector independently, so results don't depend on batch size or on other sequences, which works for variable-length text and batch-size-1 inference",
+  "They have no learnable parameters, so they train faster",
+  "They are required for the causal mask",
+  "They reduce the KV cache size",
+]
+answer = ["A"]
+explanation = """
+BatchNorm computes statistics across the batch, which is awkward for variable sequence lengths,
+small or single-example batches, and autoregressive inference. Layer-wise norms use only the
+current token's features. LayerNorm and RMSNorm do have learnable scale (and LayerNorm a bias),
+and they are unrelated to masking and the KV cache.
+"""
+
+[[questions]]
+id = "01-23"
+topic = "Residual connections"
+question = "What is the main purpose of the residual connections (x + f(x)) around attention and FFN sub-layers?"
+options = [
+  "To reduce the number of parameters in each layer",
+  "To give signals and gradients a direct path through the whole stack, so very deep models remain trainable and a layer can learn a small correction instead of a full transformation",
+  "To implement the causal mask",
+  "To combine the outputs of the different attention heads",
+]
+answer = ["B"]
+explanation = """
+Residuals create a "highway" (the residual stream) from input to output. Gradients flow through
+the identity path undiminished, which is what lets 80-layer models train, and each sub-layer only
+needs to learn what to add. They add no parameters, don't mask anything, and the heads are
+combined by the output projection W_o.
+"""
+
+[[questions]]
+id = "01-24"
+topic = "SwiGLU FFN"
+question = """
+Llama-2-7B has d_model = 4,096, but its FFN hidden size is 11,008 rather than the classic
+4 × 4,096 = 16,384. Why?
+"""
+options = [
+  "11,008 is the largest size that fits in GPU shared memory",
+  "It reduces the model to half the parameters of GPT-style FFNs",
+  "SwiGLU uses three weight matrices instead of two, so a hidden size of about 8/3·d keeps the FFN's parameter count roughly equal to a classic 4·d FFN",
+  "It is required by grouped-query attention",
+]
+answer = ["C"]
+explanation = """
+SwiGLU adds a gating matrix (gate, up and down projections). 3 × 4,096 × 11,008 ≈ 135 M parameters,
+about the same as 2 × 4,096 × 16,384 ≈ 134 M for a two-matrix FFN. The hidden size shrinks to 8/3·d,
+rounded to a hardware-friendly multiple. It isn't about shared memory, doesn't halve parameters,
+and is independent of the attention variant.
+"""
+
+[[questions]]
+id = "01-25"
+topic = "Parameter distribution"
+question = "In GPT-2 small (124 M parameters, vocabulary 50,257, d_model 768), roughly what share of all parameters is the token embedding matrix?"
+options = ["About 3%", "About 31%", "About 67%", "About 90%"]
+answer = ["B"]
+explanation = """
+50,257 × 768 = 38.6 M of 124.4 M ≈ 31%. In small models the vocabulary matrix is a large fraction
+(and it's shared with the LM head through weight tying). In large models the transformer layers
+dominate, because they grow with d² × layers while embeddings grow only with d. About 67% is the
+FFN's share *within a transformer block*, a different question.
+"""
+
+[[questions]]
+id = "01-26"
+topic = "Weight tying"
+question = "What are the effects of tying the input embedding and output LM-head weights? (Select TWO.)"
+options = [
+  "It removes vocab × d_model parameters, because one matrix is used for both",
+  "Input tokens and output predictions share one representation space: a hidden state scores highest for tokens whose embeddings point the same way",
+  "It removes the need for a softmax over the vocabulary",
+  "It makes the KV cache smaller",
+  "It allows the vocabulary to change without retraining",
+]
+answer = ["A", "B"]
+explanation = """
+The LM head computes hidden · embeddingᵀ, reusing the input matrix, which saves a full V × d matrix
+(38.6 M in GPT-2 small) and ties "what a token means" to "what predicts that token". The softmax
+over the vocabulary is still needed, the KV cache stores attention keys and values (unrelated), and
+changing the vocabulary still requires resizing and training.
+"""
+
+[[questions]]
+id = "01-27"
+topic = "Mixture of Experts"
+question = """
+MoE training shows that the router sends almost all tokens to 2 of the 8 experts, while the others
+are barely trained. What is the standard remedy?
+"""
+options = [
+  "Increase the learning rate of the router only",
+  "Add an auxiliary load-balancing loss that encourages the router to spread tokens evenly across experts",
+  "Switch from top-2 to top-1 routing",
+  "Remove the softmax from the router",
+]
+answer = ["B"]
+explanation = """
+Router collapse is a known MoE failure: popular experts get more training, become better, and
+attract even more tokens. A load-balancing auxiliary loss (introduced with GShard and Switch
+Transformer, standard in MoE training frameworks) penalises uneven expert usage. A faster router learning rate or top-1 routing doesn't fix
+the imbalance, and removing the softmax breaks the gating weights.
+"""
+
+[[questions]]
+id = "01-28"
+topic = "Mixture of Experts"
+question = """
+An MoE model has 8 experts per layer with top-2 routing, and its experts hold 45 B parameters in
+total. Roughly how many expert parameters are used to process one token?
+"""
+options = ["About 45 B", "About 22.5 B", "About 11 B", "About 5.6 B"]
+answer = ["C"]
+explanation = """
+Each token runs through 2 of the 8 experts in every layer: 2/8 = 1/4 of 45 B ≈ 11 B (Mixtral-8x7B
+has 45.1 B total and 11.3 B active expert parameters). All 45 B must still be in GPU memory,
+because different tokens pick different experts. About 22.5 B would be 4 of 8 experts, and
+about 5.6 B would be 1 of 8.
+"""
+
+[[questions]]
+id = "01-29"
+topic = "Sentence embeddings"
+question = """
+You compute sentence embeddings by averaging BERT's last_hidden_state over the sequence dimension.
+Short sentences in a padded batch get noticeably worse similarity scores than when embedded alone.
+What is the bug?
+"""
+options = [
+  "The mean includes padding tokens; multiply by the attention mask and divide by the number of real tokens",
+  "Mean pooling only works with decoder models",
+  "The [CLS] token must be excluded from all pooling",
+  "The model must be run in FP32 for pooling to work",
+]
+answer = ["A"]
+explanation = """
+In a padded batch, short sentences have many padding positions. A plain mean averages their
+hidden states in, diluting the real content, and the result depends on how much padding the batch
+needed. Masked mean pooling sums only real tokens and divides by their count, so an embedding is
+the same whether computed alone or in a batch.
+"""
+
+[[questions]]
+id = "01-30"
+topic = "Architecture families"
+question = """
+A speech-to-text system must turn a full audio clip into a transcript, where each output word may
+depend on any part of the audio. Which architecture is the natural fit, as used by OpenAI Whisper?
+"""
+options = [
+  "Encoder-only, with a classification head per audio frame",
+  "Decoder-only, fed the audio as one very long prompt",
+  "Two separate encoders compared by cosine similarity",
+  "Encoder-decoder: a bidirectional encoder reads the whole input, and a causal decoder generates text while cross-attending to it",
+]
+answer = ["D"]
+explanation = """
+Transduction tasks (translation, summarisation, speech recognition) map one full sequence to another.
+The encoder builds a representation of the entire input with bidirectional attention, and the
+decoder generates the output token by token, consulting the input through cross-attention. That is
+Whisper's and T5's design. Per-frame classification doesn't produce fluent text, and dual encoders
+are for retrieval, not generation.
+"""
