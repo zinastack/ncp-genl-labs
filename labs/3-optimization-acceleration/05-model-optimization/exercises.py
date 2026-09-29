@@ -3,6 +3,8 @@
     pytest labs/3-optimization-acceleration/05-model-optimization
 """
 
+import math
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -127,5 +129,78 @@ def decode_tokens_per_sec_bound(
 ) -> float:
     """Memory-bound upper limit on generated tokens/s across the batch: each decode step must
     read all weights once (ignore KV cache), and one step yields `batch` tokens.
+    """
+    raise NotImplementedError
+
+
+# 11 ────────────────────────────────────────────────────────────────────────────
+def checkpointed_activation_bytes(
+    n_layers: int, layer_activation_bytes: float, layer_input_bytes: float, segment_size: int,
+) -> float:
+    """Activation memory with checkpointing every `segment_size` layers:
+    (number of segments = ceil(n_layers / segment_size)) × layer_input_bytes      ← stored checkpoints
+    + segment_size × layer_activation_bytes                                       ← one segment recomputed at a time
+    """
+    raise NotImplementedError
+
+
+# 12 ────────────────────────────────────────────────────────────────────────────
+class PagedKVCache:
+    """PagedAttention-style KV-cache allocator (bookkeeping only, no tensors).
+
+    num_blocks physical blocks of block_size token slots, shared by all sequences.
+    - self.free_blocks: list of free block ids (start: list(range(num_blocks)); take with .pop())
+    - self.block_tables: seq_id → list of block ids (need not be contiguous)
+    - append_token(seq_id): add one token; allocate a new block only when the sequence's current
+      blocks are full; raise MemoryError if none are free.
+    - free(seq_id): return all its blocks to free_blocks.
+    - wasted_slots(): total unused slots in allocated blocks.
+    """
+
+    def __init__(self, num_blocks: int, block_size: int) -> None:
+        raise NotImplementedError
+
+    def append_token(self, seq_id: str) -> None:
+        raise NotImplementedError
+
+    def free(self, seq_id: str) -> None:
+        raise NotImplementedError
+
+    def wasted_slots(self) -> int:
+        raise NotImplementedError
+
+
+# 13 ────────────────────────────────────────────────────────────────────────────
+def smoothquant_scales(act_absmax: np.ndarray, weight_absmax: np.ndarray, alpha: float = 0.5) -> np.ndarray:
+    """Per input channel j: s_j = act_absmax_j^alpha / weight_absmax_j^(1 − alpha).
+    act_absmax: (in,) max |X| per input channel; weight_absmax: (in,) max |W| per ROW of W (in, out).
+    """
+    raise NotImplementedError
+
+
+def smooth(x: np.ndarray, w: np.ndarray, s: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Return (x / s, w × s per row). x: (tokens, in), w: (in, out). The product must not change."""
+    raise NotImplementedError
+
+
+# 14 ────────────────────────────────────────────────────────────────────────────
+def latency_breakdown(
+    prompt_tokens: int, output_tokens: int, prefill_tokens_per_s: float, decode_tokens_per_s: float,
+    cached_prefix_tokens: int = 0,
+) -> dict[str, float]:
+    """Return {"ttft", "tpot", "e2e"} in seconds:
+    ttft = (prompt_tokens − cached_prefix_tokens) / prefill_tokens_per_s
+    tpot = 1 / decode_tokens_per_s
+    e2e  = ttft + (output_tokens − 1) × tpot      (the first token arrives at ttft)
+    """
+    raise NotImplementedError
+
+
+# 15 ────────────────────────────────────────────────────────────────────────────
+def float_format(exp_bits: int, mantissa_bits: int) -> dict[str, float]:
+    """Properties of an IEEE-style float with this many exponent/mantissa bits (bias = 2^(e−1) − 1):
+    "max"        = (2 − 2^−mantissa_bits) × 2^bias
+    "min_normal" = 2^(1 − bias)
+    "epsilon"    = 2^−mantissa_bits
     """
     raise NotImplementedError

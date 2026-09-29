@@ -4,6 +4,7 @@ Every function is explained step by step, with worked numeric examples, in SOLUT
 """
 
 import heapq
+import math
 
 import numpy as np
 import torch
@@ -123,3 +124,71 @@ def decode_tokens_per_sec_bound(
 ) -> float:
     # Each decode step reads every weight once and yields one token per sequence in the batch.
     return mem_bandwidth / (n_params * bytes_per_param) * batch
+
+
+def checkpointed_activation_bytes(
+    n_layers: int, layer_activation_bytes: float, layer_input_bytes: float, segment_size: int,
+) -> float:
+    # Keep only the INPUT of every segment (a checkpoint) during the forward pass. In backward,
+    # one segment at a time is recomputed, so its full activations exist only for that segment.
+    n_segments = math.ceil(n_layers / segment_size)
+    return n_segments * layer_input_bytes + segment_size * layer_activation_bytes
+
+
+class PagedKVCache:
+    def __init__(self, num_blocks: int, block_size: int) -> None:
+        self.block_size = block_size
+        self.free_blocks = list(range(num_blocks))  # the physical pool, shared by all sequences
+        self.block_tables: dict[str, list[int]] = {}  # sequence → its (non-contiguous) blocks
+        self.lengths: dict[str, int] = {}
+
+    def append_token(self, seq_id: str) -> None:
+        table = self.block_tables.setdefault(seq_id, [])
+        length = self.lengths.get(seq_id, 0)
+        if length == len(table) * self.block_size:  # current block full (or none yet)
+            if not self.free_blocks:
+                raise MemoryError("KV cache full: preempt or queue the request")
+            table.append(self.free_blocks.pop())  # grab ANY free block, on demand
+        self.lengths[seq_id] = length + 1
+
+    def free(self, seq_id: str) -> None:
+        # A finished sequence returns its blocks to the pool immediately.
+        self.free_blocks.extend(self.block_tables.pop(seq_id, []))
+        self.lengths.pop(seq_id, None)
+
+    def wasted_slots(self) -> int:
+        # Only the unfilled tail of each sequence's LAST block is wasted.
+        return sum(len(t) * self.block_size - self.lengths[s] for s, t in self.block_tables.items())
+
+
+def smoothquant_scales(act_absmax: np.ndarray, weight_absmax: np.ndarray, alpha: float = 0.5) -> np.ndarray:
+    # Per input channel j: s_j = max|X_j|^α / max|W_j|^(1−α). Dividing activations by s and
+    # multiplying weights by s moves outlier magnitude from X (hard to quantize) into W (easy).
+    return act_absmax**alpha / weight_absmax ** (1 - alpha)
+
+
+def smooth(x: np.ndarray, w: np.ndarray, s: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    # X·W = (X / s)·(s · W): mathematically identical, differently distributed.
+    return x / s, w * s[:, None]
+
+
+def latency_breakdown(
+    prompt_tokens: int, output_tokens: int, prefill_tokens_per_s: float, decode_tokens_per_s: float,
+    cached_prefix_tokens: int = 0,
+) -> dict[str, float]:
+    # Prefill processes the (uncached part of the) prompt in parallel: compute-bound → TTFT.
+    ttft = (prompt_tokens - cached_prefix_tokens) / prefill_tokens_per_s
+    # Decode produces one token at a time: memory-bound → time per output token (ITL/TPOT).
+    tpot = 1 / decode_tokens_per_s
+    e2e = ttft + (output_tokens - 1) * tpot  # the first output token arrives at TTFT
+    return {"ttft": ttft, "tpot": tpot, "e2e": e2e}
+
+
+def float_format(exp_bits: int, mantissa_bits: int) -> dict[str, float]:
+    # IEEE-style layout: bias = 2^(e−1) − 1; the top exponent is reserved for inf/NaN.
+    bias = 2 ** (exp_bits - 1) - 1
+    return {
+        "max": (2 - 2.0**-mantissa_bits) * 2.0**bias,  # largest finite value: RANGE
+        "min_normal": 2.0 ** (1 - bias),  # smallest normal value: how tiny a gradient survives
+        "epsilon": 2.0**-mantissa_bits,  # gap after 1.0: PRECISION
+    }

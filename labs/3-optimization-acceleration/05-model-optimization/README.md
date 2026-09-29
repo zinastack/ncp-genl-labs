@@ -132,3 +132,10 @@ Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through ever
 | 8 | `static_batching_steps`, `inflight_batching_steps` | why continuous batching wins |
 | 9 | `speculative_expected_tokens` | draft/verify speed-up |
 | 10 | `decode_tokens_per_sec_bound` | memory-bandwidth roofline for decode |
+| 11 | `checkpointed_activation_bytes` | activation checkpointing: memory vs recompute, the √n rule |
+| 12 | `PagedKVCache` | PagedAttention's block allocator: no over-reservation, no fragmentation |
+| 13 | `smoothquant_scales`, `smooth` | SmoothQuant: moving activation outliers into weights for W8A8 |
+| 14 | `latency_breakdown` | TTFT (prefill) vs time per output token (decode), prefix caching |
+| 15 | `float_format` | FP32 / BF16 / FP16 / FP8: range vs precision |
+
+Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`](SOLUTION.md).

@@ -1,273 +1,445 @@
 # Lab 05 — Solution walkthrough
 
-How each exercise works, why each line exists, worked numbers (computed by running
-`solutions.py`), and the exam link. This is the heaviest exam domain (17%), so the "why" matters
-as much as the code.
+Every exercise is explained in four parts:
 
-The picture: every optimisation moves one of three numbers.
+- **Why it exists:** the problem it solves. This is what the exam tests.
+- **How it works:** the idea, with a small example using real numbers (computed by running `solutions.py`).
+- **The code:** why each line is there.
+- **On the exam:** a question in the exam's style, with **why each wrong answer is wrong**.
+
+This is the heaviest exam domain (17%). Nearly every question reduces to: **which resource is the
+bottleneck, and which technique moves it?**
 
 ```
-            MEMORY                      COMPUTE                      BANDWIDTH
-   weights, grads, optimizer,      matmul FLOPs (prefill,        bytes read per step
-   activations, KV cache           training)                      (decode = memory-bound)
-   ex. 1, 2, 3, 4, 5               ex. 6, 7 (smaller models)       ex. 8, 9, 10
+            MEMORY                          COMPUTE                         MEMORY BANDWIDTH
+ weights, grads, optimizer (1),      matmul FLOPs: training,         bytes read per decode step
+ activations (5, 11), KV cache       prefill (14)                    (decode is memory-bound, 10)
+ (2, 12), precision (3, 4, 13, 15)   smaller models (6, 7)           batching (8), speculation (9)
 ```
+
+| Symptom | Bottleneck | First levers |
+|---|---|---|
+| OOM during training | memory | mixed precision, activation checkpointing, grad accumulation, ZeRO/FSDP (Lab 06), LoRA/QLoRA |
+| Slow first token on long prompts | prefill compute | prefix caching, chunked prefill, FP8, FlashAttention |
+| Slow token generation at batch 1 | memory bandwidth | weight quantization, speculative decoding, batching |
+| Few concurrent users fit | KV-cache memory | paged KV cache, FP8 KV, GQA |
+| GPU idle between requests | scheduling | in-flight batching, dynamic batching |
 
 ---
 
 ## Exercise 1 — `training_memory_bytes`: the 16 bytes/parameter rule
 
-Mixed-precision training with Adam keeps, **per parameter**:
+### Why it exists
 
-| what | bytes | why it exists |
+Before launching training you must know whether it fits. The weights are only a fraction of the memory.
+
+| item | bytes / param | why it exists |
 |---|---|---|
-| bf16 weights | 2 | used in forward/backward |
+| bf16 weights | 2 | forward/backward |
 | bf16 gradients | 2 | result of backward |
-| fp32 master weights | 4 | small updates vanish in bf16, so the optimizer updates an fp32 copy |
-| Adam momentum `m` | 4 | running average of gradients |
-| Adam variance `v` | 4 | running average of squared gradients |
-| **total** | **16** | 7B model → **112 GB**, before activations |
+| fp32 master weights | 4 | tiny updates vanish in bf16 (ex. 15), so the optimizer updates an fp32 copy |
+| Adam m | 4 | running mean of gradients |
+| Adam v | 4 | running mean of squared gradients |
+| **total** | **16** | 7B → **112 GB** before activations |
 
-The function splits this into **every** parameter's stored weight (`weight_bytes`) plus **14 bytes
-per trainable** parameter (grads + master + m + v):
+The function: every weight stored at `weight_bytes`, plus **14 bytes per trainable** parameter.
 
-| setup | formula | result |
-|---|---|---|
-| full FT, 7B | 7e9 × 2 + 7e9 × 14 | 112 GB |
-| LoRA, 7B, 20M trainable | 7e9 × 2 + 20e6 × 14 | 14.28 GB |
-| QLoRA, 70B, 100M trainable, 4-bit | 70e9 × 0.5 + 100e6 × 14 | 36.4 GB |
+| setup | result |
+|---|---|
+| full FT, 7B | 112 GB |
+| LoRA, 7B, 20M trainable | 14.28 GB |
+| QLoRA, 70B, 100M trainable, 4-bit | 36.4 GB |
 
-That's why a 70B fine-tune fits on one 48 GB GPU with QLoRA and needs a cluster otherwise.
-Activations come on top, and activation checkpointing (README) is their fix.
+### On the exam
+
+*Weights + grads + Adam for full fine-tuning of 13B?* 13B × 16 ≈ **208 GB**. Wrong answers: 26 GB
+(bf16 weights only), 52 GB, 1 TB. *Where does LoRA's saving come from?* Gradients and optimizer
+states exist only for adapter parameters: **~14 bytes saved per frozen parameter**.
 
 ---
 
 ## Exercise 2 — `max_batch_size`: how many users fit on a GPU
 
-At inference, memory = weights + **KV cache per sequence** × sequences + workspace.
+### Why it exists
+
+At inference, memory = weights + **KV cache per sequence** (Lab 01) × concurrent sequences + workspace.
+Batch size decides throughput and cost per token, and it's usually limited by the KV cache, not by compute.
 
 ```
-80 GB GPU, keep 10% for activations → 72 GB usable
-Llama-2-7B fp16 weights: 13.5 GB     → 58.5 GB left
-KV per 4k sequence: 2 GiB (Lab 01)   → floor(58.5e9 / 2.147e9) = 27 concurrent sequences
+80 GB GPU, keep 10% for workspace → 72 GB; Llama-2-7B fp16 weights 13.5 GB → 58.5 GB left
+KV per 4k-token sequence 2 GiB → floor(58.5e9 / 2.147e9) = 27 concurrent sequences
 ```
 
-`max(0, …)` handles "the weights don't even fit" (a 16 GB GPU gives 0). This is the calculation
-behind GQA, FP8 KV cache and paged attention: each one raises that 27.
+### On the exam
+
+Every KV-cache technique raises that 27: **GQA** (fewer KV heads), **FP8 KV cache** (half the bytes:
+*"8 sessions of 32k fit; how do I double that?"*), **paged KV** (no wasted reservations, ex. 12).
+Weight quantization frees some memory but doesn't shrink the per-session cache.
 
 ---
 
-## Exercise 3 — `quantize_int8` / `dequantize`: fewer bytes per weight
+## Exercise 3 — `quantize_int8`: fewer bytes per weight
 
-Map floats to integers in `[-127, 127]` with a **scale**:
+### Why it exists
 
-```
-scale = max|w| / 127        q = round(w / scale)        w ≈ q · scale
-```
-
-The problem is **outliers**. Take a weight matrix with one big value:
+Fewer bits per weight means less memory **and** fewer bytes to read per decode step, which is
+faster in memory-bound decode (ex. 10). The difficulty is **outliers**.
 
 ```
-w = [[ 0.1, -0.5, 0.3],
-     [40.0, -2.0, 1.0]]
+w = [[0.1, -0.5, 0.3], [40.0, -2.0, 1.0]]
+per-tensor (one scale 40/127 = 0.315): row 0 → [0, -2, 1] → recovered [0.0, -0.63, 0.31]  (0.1 lost)
+per-row scales (0.0039 and 0.315):     row 0 → [25, -127, 76] → [0.098, -0.50, 0.299] ✓
 ```
 
-| | scale(s) | row 0 as int8 | row 0 recovered |
-|---|---|---|---|
-| **per-tensor** | one scale: 40/127 = 0.315 | `[0, -2, 1]` | `[0.0, -0.63, 0.31]` (0.1 became 0) |
-| **per-channel** (per row) | 0.5/127 = 0.0039 and 40/127 = 0.315 | `[25, -127, 76]` | `[0.098, -0.50, 0.299]` ✓ |
+`scale = max|w| / 127`, `q = round(w / scale)`. One outlier forces a huge step size for everyone;
+per-channel (or per-group of 128) scales isolate it. The test requires a 10× lower error.
 
-With one scale, the step size is 0.315, so small weights fall between steps and round to 0.
-Per-row scales let each row use its full 255 levels. The test builds a matrix with one outlier
-row and requires per-channel error to be **10× smaller**. On real Qwen weights (GPU lab), per-channel
-wins as well.
+### On the exam
 
-Code notes: `np.maximum(absmax, 1e-12)` avoids dividing by zero for an all-zero row, `np.clip`
-keeps rounding inside the int8 range, and `keepdims=True` gives shape `(rows, 1)` so each row divides by its own scale.
+| technique | what's quantized | helps |
+|---|---|---|
+| **weight-only INT4** (AWQ, GPTQ) | weights | memory-bound **decode** |
+| **W8A8** (SmoothQuant, ex. 13) | weights + activations | compute-bound **prefill** (INT8 tensor cores) |
+| **FP8** (Hopper/Ada, Transformer Engine) | weights + activations | training and inference |
+| **KV-cache FP8/INT8** | cache | concurrency / context |
+| **PTQ** | after training, calibration set | fast; fine at 8 bits |
+| **QAT** | simulated quantization during training | when PTQ at 4-bit loses too much accuracy |
 
-**Exam link:** per-channel or per-group (e.g. 128) scales; SmoothQuant for *activation* outliers;
-weight-only INT4 (AWQ/GPTQ) speeds up memory-bound decode.
+NVIDIA tooling: **TensorRT Model Optimizer** (PTQ, QAT, sparsity, distillation) → TensorRT-LLM engines.
 
 ---
 
 ## Exercise 4 — `DynamicLossScaler`: making FP16 training work
 
-FP16 has a **small range**: the largest value is 65,504, and very small values round to 0. Real
-gradients are often tiny: `float16(1e-8) = 0.0`, so the gradient is gone. **Loss scaling** multiplies
-the loss (and so every gradient) by a big factor before backward: `1e-8 × 1024 = 1.02e-5`, which fits.
-The optimizer divides it back out before updating.
+### Why it exists
 
-The scale must be as big as possible without overflowing to `inf`, and nobody knows that value in
-advance, so it **adapts** (scale 1024, growth every 3 good steps):
+FP16's smallest normal value is 6.1e-5 (ex. 15). Many gradients are smaller and **underflow to 0**:
+`float16(1e-8) = 0`. **Loss scaling** multiplies the loss (so every gradient) by a large factor before
+backward (`1e-8 × 1024 = 1.02e-5` survives), and unscales before the update. Too large a factor overflows
+to `inf`, so the scale **adapts**:
 
 | step | overflow? | action | scale after |
 |---|---|---|---|
-| 1 | yes | skip the update, halve | 512 |
-| 2 | no | good step 1 | 512 |
-| 3 | no | good step 2 | 512 |
-| 4 | no | good step 3 → double, reset counter | 1024 |
-| 5 | no | good step 1 | 1024 |
+| 1 | yes | **skip** the update, halve | 512 |
+| 2–3 | no | count good steps | 512 |
+| 4 | no | 3 good steps → double | 1024 |
 | 6 | yes | skip, halve, reset counter | 512 |
 
-- `update()` returns **False on overflow**, meaning skip `optimizer.step()`. A gradient containing `inf` would destroy the weights.
-- Reset the counter on overflow so growth needs a fresh run of clean steps.
+`update()` returns False, meaning **skip `optimizer.step()`**, because an `inf` gradient would destroy the weights.
 
-> **Exam link:** **BF16 has FP32's exponent range**, so loss scaling isn't needed. That's the main
-> reason A100/H100 training uses BF16.
+### On the exam
+
+*Repeated inf/NaN and a dropping scale:* each overflow step is **skipped and the scale halved**.
+**BF16 has FP32's exponent range, so no loss scaling is needed**, the main reason A100/H100 training uses BF16.
 
 ---
 
 ## Exercise 5 — `accumulated_gradients`: a big batch that doesn't fit
 
-If batch 32 doesn't fit but batch 8 does, run 4 micro-batches and **add up their gradients**
-before one optimizer step:
+### Why it exists
+
+The recipe says global batch 512, but only 16 fit per GPU. Run several micro-batches and **add their
+gradients** before one optimizer step.
 
 ```python
-model.zero_grad()                          # once, at the start
-for xb, yb in chunks:                      # 4 micro-batches
-    loss = mse(model(xb), yb) / len(chunks)   # ÷4 so the SUM equals the full-batch MEAN
-    loss.backward()                        # PyTorch ADDS into .grad, it doesn't overwrite
+model.zero_grad()                         # once
+for chunk in 4 chunks:
+    (loss(chunk) / 4).backward()          # backward ADDS into .grad; ÷4 so the sum = full-batch mean
+optimizer.step()
 ```
 
-- `backward()` **accumulates** into `.grad`. Zeroing between micro-batches would keep only the last one.
-- Dividing by the number of chunks makes the summed gradient equal the gradient of the mean loss
-  over all 32 examples. The test checks this to floating-point precision.
-- Global batch = micro-batch × accumulation steps × data-parallel GPUs. It saves **memory, not time**.
+The test checks that this equals the full-batch gradient to floating-point precision.
+
+### On the exam
+
+**Global batch = micro-batch × accumulation steps × data-parallel GPUs**: 16 × 4 × 8 = 512.
+It saves **memory, not time**, and it isn't equivalent to scaling the learning rate.
 
 ---
 
 ## Exercise 6 — `distillation_loss`: a small student copies a big teacher
 
-The teacher's full probability distribution carries more information than the single correct label.
-For an image of a "7" the teacher might say 90% "7", 8% "1", 2% "9", which teaches that 7 looks like 1.
+### Why it exists
+
+A small model trained on hard labels only learns "the answer is 7". A teacher's full distribution
+says "7, but a bit like 1", and that **dark knowledge** trains better students. That's how compact
+production models are made cheaply (NVIDIA **Minitron** = prune + distil).
 
 ```
-L = α · T² · KL( softmax(teacher/T) ‖ softmax(student/T) )  +  (1 − α) · CE(student, label)
+L = α · T² · KL(softmax(teacher/T) ‖ softmax(student/T)) + (1 − α) · CE(student, label)
+teacher logits [3, 1, -1]:  T=1 → [0.867, 0.117, 0.016]   T=4 → [0.506, 0.307, 0.186]
 ```
 
-**Temperature T softens the teacher**, the same softmax temperature as Lab 02. With teacher logits `[3, 1, -1]`:
+- **T > 1** softens the teacher so the relationships between classes become visible (the same temperature as Lab 02).
+- **T²** restores the gradient scale that softening shrinks (by about 1/T²).
+- `F.kl_div` takes the student as **log-probs** and the teacher as **probs**.
 
-| T | teacher probabilities |
-|---|---|
-| 1 | `[0.867, 0.117, 0.016]` (almost one-hot) |
-| 2 | `[0.665, 0.245, 0.090]` |
-| 4 | `[0.506, 0.307, 0.186]` (the "dark knowledge" is visible) |
+### On the exam
 
-- **Why T²?** Softening by T shrinks the gradients by about 1/T², so multiplying by T² keeps the
-  KD term balanced against the hard-label term.
-- `F.kl_div(log_student, teacher_probs, reduction="batchmean")` expects the student as
-  **log-probabilities** and the teacher as **probabilities**. That argument order trips many people up.
-- Identical logits give zero KD loss (the test checks this).
-
-NVIDIA **Minitron** = prune a big model + distil from the original, which gives good small models cheaply.
+*Why divide by T > 1 and multiply by T²?* Softening reveals the teacher's ranking of wrong classes,
+and T² balances the two loss terms. Wrong: "deterministic outputs", "avoids overflow", "only matters at inference".
 
 ---
 
 ## Exercise 7 — `prune_2_4`: sparsity the GPU can use
 
-Randomly zeroing weights rarely speeds anything up on a GPU. **2:4 sparsity** is a fixed pattern
-(in every group of 4 weights, exactly 2 are zero) that Ampere, Hopper and later **sparse tensor
-cores** accelerate, up to 2× on matmuls.
+### Why it exists
+
+Zeroing random weights rarely speeds anything up, because GPUs can't skip irregular zeros.
+**2:4 structured sparsity**, exactly 2 zeros in every 4 consecutive weights, is a pattern that
+**sparse tensor cores** (Ampere and later) accelerate by up to 2× on matmuls.
 
 ```
-[0.1, -0.9, 0.3, 0.05 | 2.0, -3.0, 0.0, 1.0]
- keep the 2 largest |w| in each group of 4:
-[0,   -0.9, 0.3, 0    | 2.0, -3.0, 0,   0  ]
+[0.1, -0.9, 0.3, 0.05 | 2.0, -3.0, 0.0, 1.0]  →  [0, -0.9, 0.3, 0 | 2.0, -3.0, 0, 0]
 ```
 
-Code: reshape to `(-1, 4)` groups, `argsort(-|w|)[:, :2]` picks the two largest per group,
-`put_along_axis` builds the keep-mask, and then reshape back. Exactly 50% zeros. Accuracy drops, so
-production **fine-tunes after pruning** (the GPU lab shows the raw error).
+Keep the 2 largest magnitudes per group. Accuracy drops, so **fine-tune after pruning**.
+
+### On the exam
+
+2:4 gives 50% sparsity with hardware support. Unstructured sparsity isn't accelerated automatically,
+and 2:4 doesn't shrink the KV cache or remove layers (removing layers is depth pruning, as in Minitron).
 
 ---
 
 ## Exercise 8 — static vs in-flight batching
 
-Eight requests with output lengths `[10, 200, 12, 15, 180, 9, 11, 14]` (451 tokens of real work), 4 GPU slots:
+### Why it exists
 
-**Static batching:** requests are grouped in fours, and each group holds the GPU until its
-*longest* member finishes.
-```
-batch 1: [10, 200, 12, 15] → 200 steps     (three slots idle for ~190 steps)
-batch 2: [180, 9, 11, 14]  → 180 steps
-total 380 steps
-```
+LLM outputs vary wildly in length (10 to 2,000 tokens). With **static batching** every request
+waits for the longest in its batch, so slots sit idle. **In-flight (continuous) batching** swaps
+finished requests out and new ones in **at every decode step**.
 
-**In-flight (continuous) batching:** when any request finishes, the next one takes its slot.
 ```
-slots start with 10, 200, 12, 15
-t=10: slot 1 free → the 180-token request runs until 190
-t=12: → the 9-token request until 21 · t=15: → 11 until 26 · t=21: → 14 until 35
-last finish: 200 steps
+lengths [10, 200, 12, 15, 180, 9, 11, 14], 4 slots (451 tokens of real work)
+static:    [10,200,12,15] → 200 steps, [180,9,11,14] → 180 steps   total 380
+in-flight: slot 1 finishes at 10 → the 180-token request starts … last finish at 200
 ```
 
-Code: a **min-heap** of slot finish times. `heappop` gives the slot that frees first, the request
-starts then, and its finish time is pushed back. Total time = the latest finish. That is the
-scheduler inside TensorRT-LLM, vLLM and NIM, and it raises throughput and GPU utilisation (not
-single-request latency).
+A min-heap of slot-free times: each request takes the earliest free slot.
+
+### On the exam
+
+In-flight batching (TensorRT-LLM, vLLM, NIM) improves **throughput and GPU utilisation**, not the
+latency of a single request. Bigger static batches or padding outputs to the maximum make the waste worse.
 
 ---
 
 ## Exercise 9 — `speculative_expected_tokens`: guessing ahead
 
-The big model is memory-bound at decode (next exercise), so checking 5 tokens costs about the
-same as generating 1. A small **draft model** guesses γ tokens, and the big model verifies them
-all in **one** pass, keeping the correct prefix plus one token of its own.
+### Why it exists
 
-If each guess is accepted independently with probability α, the expected tokens per big-model pass
-are a geometric series:
+Decode is memory-bound (ex. 10): verifying 5 tokens costs about the same as generating 1. A cheap
+**draft** model guesses γ tokens, and the big model checks them in **one** pass.
 
 ```
-1 + α + α² + … + α^γ = (1 − α^(γ+1)) / (1 − α)
+expected tokens per big-model pass = 1 + α + α² + … + α^γ = (1 − α^(γ+1)) / (1 − α)
 ```
 
 | α \ γ | 2 | 4 | 8 |
 |---|---|---|---|
 | 0.5 | 1.75 | 1.94 | 2.00 |
-| 0.7 | 2.19 | 2.77 | 3.20 |
 | 0.8 | 2.44 | 3.36 | 4.33 |
 | 0.9 | 2.71 | 4.10 | 6.13 |
 
-- α = 0 still yields **1** token (the big model's own correction), so it's never slower in tokens per pass.
-- A longer draft helps only when α is high: at α = 0.5, going from 4 to 8 guesses adds almost nothing.
-- The output is **identical** to the big model's (the GPU lab checks this). The acceptance rule guarantees it.
-- `a == 1` needs a special case, because the formula would divide by zero.
+### On the exam (Select TWO)
+
+✅ the draft proposes and the target verifies in one pass; ✅ the output **distribution is identical** to
+the target's. ❌ lower memory (both models are loaded); ❌ biggest gains at large batch (it's a
+**low-batch latency** technique); ❌ retraining the target. Variants: Medusa heads, EAGLE.
 
 ---
 
 ## Exercise 10 — `decode_tokens_per_sec_bound`: the decode roofline
 
-Each decode step reads **every weight once** to produce one token per sequence. At batch 1 the GPU
-waits on memory, not math:
+### Why it exists
+
+Every decode step reads **every weight once** to produce one token per sequence. At batch 1 the GPU waits on memory:
 
 ```
-tokens/s ≤ memory_bandwidth / bytes_of_weights × batch
+tokens/s ≤ bandwidth / weight bytes × batch
 ```
 
 | model | GPU | bound |
 |---|---|---|
-| 70B fp16 (140 GB) | H100, 3.35 TB/s | ~24 tokens/s |
-| 8B fp16 (16 GB) | L4, 300 GB/s | ~19 tokens/s |
-| 8B INT4 (4 GB) | L4, 300 GB/s | ~75 tokens/s (4× fewer bytes → 4× faster) |
+| 70B fp16 (140 GB) | H100 3.35 TB/s | ~24 tokens/s |
+| 8B fp16 | L4 300 GB/s | ~19 tokens/s |
+| 8B INT4 | L4 300 GB/s | ~75 tokens/s |
 
-This one line explains most of inference optimisation:
-- **batching:** one weight read serves many sequences, so throughput scales with batch (until compute or KV memory runs out);
-- **weight quantization:** fewer bytes per step;
-- **speculative decoding:** more tokens per weight read.
+This one line explains batching (one read serves many sequences), weight quantization (fewer bytes)
+and speculative decoding (more tokens per read).
+
+### On the exam
+
+*70B FP16 at batch 1 is far below peak FLOPs: bottleneck?* **Memory bandwidth.** Not tensor-core compute,
+not PCIe, not the tokenizer.
 
 ---
 
-## How this lab maps to exam questions
+## Exercise 11 — `checkpointed_activation_bytes`: trading compute for memory
 
-| If a question mentions… | Think… |
+### Why it exists
+
+Backward needs the activations saved during forward. They grow with **batch × sequence × hidden × layers**
+and often dominate memory at long sequences. **Activation (gradient) checkpointing** keeps only
+some layer inputs and **recomputes** the rest during backward.
+
+### How it works
+
+Store the input of every segment (a "checkpoint"); in backward, recompute one segment at a time:
+
+```
+memory = (#segments × layer_input) + (segment_size × layer_activations)
+64 layers, input and activations cost 1 unit each:
+  segment 1 → 64+1 = 65    segment 8 → 8+8 = 16 (minimum: the classic √n rule)    no checkpointing → 64
+realistic (a layer's activations ≈ 17× its input): segment 2 → 32 + 34 = 66 units vs 1,088 without, ~16× less
+```
+
+Cost: an **extra forward pass**, typically **+20–35% compute**. **Selective checkpointing**
+recomputes only cheap-but-large parts (like attention scores) to cut the overhead.
+
+### On the exam
+
+*OOM from activations at 8k sequence length; weights fit:* **activation checkpointing** (costs extra
+compute). Wrong: INT4 weights (activations unchanged), a higher learning rate, "disable the KV cache"
+(an inference mechanism).
+
+---
+
+## Exercise 12 — `PagedKVCache`: virtual memory for the KV cache
+
+### Why it exists
+
+Naive servers **reserve a contiguous max-length buffer** per request: 2,048 slots for an answer that
+ends after 20 tokens. Most of the KV memory is wasted or fragmented, so fewer requests fit.
+**PagedAttention** (vLLM, TensorRT-LLM, NIM) allocates the cache in **small fixed-size blocks on
+demand**, tracked by a per-sequence **block table**, like OS virtual memory pages.
+
+### How it works
+
+8 blocks of 16 slots; sequence "a" has 20 tokens, "b" has 5:
+
+```
+a → blocks [7, 6]   (32 slots, 20 used)     b → block [5]   (16 slots, 5 used)
+wasted: 12 + 11 = 23 slots      vs contiguous 2,048-slot reservations: 4,071 slots wasted
+free("a") → its 2 blocks return to the pool immediately
+```
+
+- A new block is taken only when the current one is full, and **any** free block works (no need for contiguity).
+- An empty pool raises `MemoryError`; real schedulers then **preempt** or queue requests.
+- Bonus: identical prefixes (a shared system prompt) can **share blocks**, which is prefix caching.
+
+### On the exam
+
+*What does PagedAttention solve?* **Fragmentation and over-reservation of contiguous KV buffers.**
+Not attention FLOPs (that's FlashAttention's area, Lab 01), not FP16 softmax stability, not tokenisation.
+
+---
+
+## Exercise 13 — SmoothQuant: making activations quantizable
+
+### Why it exists
+
+W8A8 (INT8 weights **and** activations) speeds up compute-bound prefill on INT8 tensor cores. But LLM
+**activations have huge outliers in a few channels**, so one INT8 scale can't fit both the outlier and
+the normal values. Weights are smooth and easy to quantize. **SmoothQuant moves the difficulty from activations into weights.**
+
+### How it works
+
+```
+s_j = max|X_j|^α / max|W_j|^(1−α)       (α = 0.5)
+X' = X / s,  W' = s · W   →  X'·W' = X·W  exactly (the test checks it)
+```
+
+With one activation channel 60× larger than the rest: the channel max/median ratio drops from 54 to
+10, and the **W8A8 error drops about 3×** (0.052 → 0.017). No retraining: it's a mathematically
+equivalent rescaling, done offline.
+
+### On the exam
+
+*W8A8 accuracy is ruined by activation outliers:* **SmoothQuant.** AWQ is weight-only (activations
+untouched), distillation doesn't fix outliers, and temperature is unrelated.
+
+---
+
+## Exercise 14 — `latency_breakdown`: TTFT vs time per output token
+
+### Why it exists
+
+Users feel two different delays, caused by two different phases:
+
+| phase | what | bound by | metric |
+|---|---|---|---|
+| **prefill** | process the whole prompt in parallel, build the KV cache | **compute** | **TTFT** (time to first token) |
+| **decode** | one token at a time | **memory bandwidth** | **TPOT / ITL** (time per output token) |
+
+### How it works
+
+A 12,000-token RAG prompt, 300 output tokens, prefill 20k tokens/s, decode 40 tokens/s:
+
+```
+TTFT = 12,000 / 20,000 = 0.60 s      TPOT = 1/40 = 25 ms      end-to-end = 0.6 + 299 × 0.025 = 8.08 s
+with 10,000 prompt tokens already cached (prefix caching): TTFT = 0.10 s, TPOT unchanged
+```
+
+### On the exam
+
+*Long RAG prompts, slow first token, fine inter-token latency (Select TWO):* **prefix/KV-cache reuse**
+and **faster prefill** (chunked prefill, FP8, efficient attention). Weight-only INT4 and speculative
+decoding target **decode**, and max_tokens doesn't affect TTFT. **Chunked prefill** splits long prompts
+so they don't stall other users' decode steps, which smooths ITL spikes.
+
+---
+
+## Exercise 15 — `float_format`: range vs precision
+
+### Why it exists
+
+"Which precision?" questions come down to two properties: **range** (the largest and smallest
+representable values, set by the exponent bits) and **precision** (the gap between neighbouring
+values, set by the mantissa bits).
+
+| format | exp / mantissa | max | smallest normal | epsilon |
+|---|---|---|---|---|
+| FP32 | 8 / 23 | 3.4e38 | 1.2e-38 | 1.2e-7 |
+| **BF16** | **8** / 7 | **3.4e38** | 1.2e-38 | 7.8e-3 |
+| **FP16** | 5 / **10** | **65,504** | 6.1e-5 | 9.8e-4 |
+| FP8 E5M2 | 5 / 2 | 57,344 | 6.1e-5 | 0.25 |
+| FP8 E4M3 | 4 / 3 | 448 * | 1.6e-2 | 0.125 |
+
+\* E4M3 as used on Hopper (OCP FP8 spec) reuses the exponent codes an IEEE layout reserves for inf, so its
+max is 448 rather than the IEEE-style 240 this formula gives.
+
+- **BF16 = FP32's range with less precision**, so no overflow/underflow and no loss scaling.
+- **FP16 = more precision, tiny range**, so it needs loss scaling (ex. 4).
+- **FP8 on Hopper:** **E4M3 for forward** (weights, activations: more precision), **E5M2 for gradients**
+  (more range), with per-tensor scaling managed by **Transformer Engine**.
+- **TF32** (Ampere+): FP32 range with a 10-bit mantissa, used automatically for FP32 matmuls on tensor cores.
+
+### On the exam
+
+*Why prefer BF16 over FP16 on A100/H100?* **Same exponent range as FP32, so gradients rarely overflow
+or underflow and no loss scaling is needed.** Wrong: "more mantissa bits" (it has fewer), "half the
+memory of FP16" (both are 16 bits), "the only tensor-core format".
+
+---
+
+## Quiz topic → where you learn it in this lab
+
+| Quiz topic | Exercise / section |
 |---|---|
-| memory for full fine-tuning | ~16 B/param (+ activations) |
-| OOM from activations at long sequence | activation checkpointing (compute ↔ memory) |
-| FP16 inf/NaN, scale keeps dropping | dynamic loss scaling; switch to BF16 |
-| target batch doesn't fit | gradient accumulation (memory, not speed) |
-| accuracy loss after INT8 PTQ | per-channel/group scales; SmoothQuant; QAT if still bad |
-| variable output lengths waste GPU | in-flight (continuous) batching |
-| long prompts slow to first token | prefill: prefix caching, chunked prefill, FP8 |
-| slow token generation at batch 1 | memory-bound: quantize weights, speculative decoding, batch |
-| KV cache limits concurrency | FP8 KV cache, paged KV, GQA |
-| Ampere sparse speed-up | 2:4 structured sparsity |
+| Training memory, LoRA memory | 1 |
+| BF16 vs FP16, loss scaling | 4, 15 |
+| Gradient accumulation | 5 |
+| Activation checkpointing | 11 |
+| Decode bottleneck | 10 |
+| In-flight batching | 8 |
+| Paged KV cache | 12 |
+| KV-cache quantization | 2, 3 |
+| Quantization granularity, PTQ vs QAT | 3 |
+| SmoothQuant / W8A8 | 13 |
+| Speculative decoding | 9 |
+| Knowledge distillation | 6 |
+| 2:4 sparsity | 7 |
+| Latency vs throughput, TTFT | 8, 14 |
+| TensorRT-LLM, data loading | README §4–5 and the bottleneck table at the top |

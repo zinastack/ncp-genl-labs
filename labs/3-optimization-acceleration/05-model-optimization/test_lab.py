@@ -95,3 +95,67 @@ def test_10_decode_roofline(lab):
     int4 = lab.decode_tokens_per_sec_bound(70e9, 0.5, h100_bw)
     assert int4 == pytest.approx(4 * 23.93, rel=0.01), "4-bit weights → ~4x faster memory-bound decode"
     assert lab.decode_tokens_per_sec_bound(70e9, 2, h100_bw, batch=16) == pytest.approx(16 * 23.93, rel=0.01)
+
+
+def test_11_activation_checkpointing(lab):
+    # Equal per-layer input and activation cost: the classic √n rule.
+    costs = {seg: lab.checkpointed_activation_bytes(64, 1, 1, seg) for seg in (1, 2, 4, 8, 16, 32, 64)}
+    assert min(costs, key=costs.get) == 8 and costs[8] == 16, "√64 = 8 segments of 8 layers"
+    # Realistic: a layer's internal activations ≈ 17× its input.
+    assert lab.checkpointed_activation_bytes(64, 17, 1, 2) == 66
+    assert 64 * 17 / lab.checkpointed_activation_bytes(64, 17, 1, 2) > 16, "~16× less activation memory"
+    assert lab.checkpointed_activation_bytes(10, 5, 1, 4) == 3 * 1 + 4 * 5, "ceil for a partial last segment"
+
+
+def test_12_paged_kv_cache(lab):
+    c = lab.PagedKVCache(num_blocks=8, block_size=16)
+    for _ in range(20):
+        c.append_token("a")
+    for _ in range(5):
+        c.append_token("b")
+    assert len(c.block_tables["a"]) == 2 and len(c.block_tables["b"]) == 1
+    assert len(c.free_blocks) == 5
+    assert c.wasted_slots() == (32 - 20) + (16 - 5), "only the tail of each last block is wasted"
+    c.free("a")
+    assert len(c.free_blocks) == 7 and "a" not in c.block_tables
+    small = lab.PagedKVCache(num_blocks=1, block_size=4)
+    for _ in range(4):
+        small.append_token("x")
+    with pytest.raises(MemoryError):
+        small.append_token("x")
+
+
+def test_13_smoothquant(lab):
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=(64, 16))
+    x[:, 3] *= 60  # one outlier activation channel (typical of LLMs)
+    w = rng.normal(size=(16, 8)) * 0.05
+    s = lab.smoothquant_scales(np.abs(x).max(0), np.abs(w).max(1))
+    xs, ws = lab.smooth(x, w, s)
+    np.testing.assert_allclose(xs @ ws, x @ w, atol=1e-10)  # mathematically identical
+
+    def q8(t, axis=None):
+        scale = np.abs(t).max(axis=axis, keepdims=axis is not None) / 127
+        return np.round(t / scale) * scale
+
+    naive = np.abs(q8(x) @ q8(w, axis=0) - x @ w).mean()
+    smoothed = np.abs(q8(xs) @ q8(ws, axis=0) - x @ w).mean()
+    assert smoothed < naive / 2, "W8A8 error drops once the activation outlier is smoothed"
+
+
+def test_14_latency_breakdown(lab):
+    r = lab.latency_breakdown(12_000, 300, prefill_tokens_per_s=20_000, decode_tokens_per_s=40)
+    assert r["ttft"] == pytest.approx(0.6) and r["tpot"] == pytest.approx(0.025)
+    assert r["e2e"] == pytest.approx(0.6 + 299 * 0.025)
+    cached = lab.latency_breakdown(12_000, 300, 20_000, 40, cached_prefix_tokens=10_000)
+    assert cached["ttft"] == pytest.approx(0.1), "prefix caching cuts TTFT, not TPOT"
+    assert cached["tpot"] == r["tpot"]
+
+
+def test_15_float_formats(lab):
+    fp16, bf16 = lab.float_format(5, 10), lab.float_format(8, 7)
+    assert fp16["max"] == 65504.0 and fp16["min_normal"] == pytest.approx(6.1035e-05, rel=1e-4)
+    assert bf16["max"] == pytest.approx(3.39e38, rel=1e-2), "bf16 has FP32's range"
+    assert bf16["epsilon"] > fp16["epsilon"], "…but less precision than fp16"
+    assert lab.float_format(5, 2)["max"] == 57344.0, "FP8 E5M2"
+    assert fp16["max"] == float(np.finfo(np.float16).max)

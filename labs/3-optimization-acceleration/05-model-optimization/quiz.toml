@@ -398,3 +398,373 @@ Frozen parameters need no gradients, fp32 master copies or Adam moments. That's 
 bytes per parameter. The weights stay in BF16 (4-bit only with QLoRA). Activations still need
 storage for the backward pass through the frozen layers.
 """
+
+[[questions]]
+id = "05-21"
+topic = "Selective checkpointing"
+question = """
+Full activation checkpointing fixes an out-of-memory error but adds about 30% to step time. What
+reduces the overhead while keeping most of the memory savings?
+"""
+options = [
+  "Selective activation checkpointing: recompute only parts whose activations are large but cheap to recompute (for example attention scores and softmax), and store the rest",
+  "Disabling mixed precision",
+  "Increasing the micro-batch size",
+  "Checkpointing only the embedding layer",
+]
+answer = ["A"]
+explanation = """
+Not all activations cost the same to store or to recompute. Selective checkpointing (as in
+Megatron-LM) recomputes memory-heavy, compute-light operations and keeps expensive matmul outputs,
+which gets much of the saving for a few percent of extra compute. FP32 or bigger micro-batches
+increase memory, and the embedding layer's activations aren't the problem.
+"""
+
+[[questions]]
+id = "05-22"
+topic = "Prefix sharing"
+question = """
+Thousands of requests share the same 2,000-token system prompt. With a paged KV cache, what
+optimisation does this enable?
+"""
+options = [
+  "Skipping decode for those requests",
+  "Removing attention for the system prompt tokens",
+  "Sharing the KV blocks of the common prefix between requests (prefix caching), so the prefix is stored once and its prefill is skipped",
+  "Quantizing the system prompt to INT4",
+]
+answer = ["C"]
+explanation = """
+Block tables can point several sequences at the same physical blocks, with copy-on-write when they
+diverge. The shared prefix is computed and stored once, saving memory and TTFT. Decode and attention
+still run for every request, and prompts aren't quantized to INT4.
+"""
+
+[[questions]]
+id = "05-23"
+topic = "SmoothQuant"
+question = "Which statement about SmoothQuant is correct?"
+options = [
+  "It requires full retraining of the model",
+  "It divides activations and multiplies the matching weight rows by the same per-channel factors, so the product is unchanged but activations become easier to quantize to INT8",
+  "It quantizes only the weights and leaves activations in FP16",
+  "It removes outlier channels from the model",
+]
+answer = ["B"]
+explanation = """
+X·W = (X/s)·(s·W), so the smoothing is an exact, offline rescaling with no retraining. It shifts
+quantization difficulty from activation outliers to weights, which enables W8A8. Weight-only
+quantization is AWQ or GPTQ, and outlier channels are rescaled, not removed.
+"""
+
+[[questions]]
+id = "05-24"
+topic = "AWQ"
+question = "What is the key idea of AWQ (Activation-aware Weight Quantization)?"
+options = [
+  "It quantizes activations to 4 bits",
+  "It trains the model with quantization in the loop",
+  "It prunes 50% of the weights",
+  "Weights that multiply large activations matter most, so it scales those salient weight channels before 4-bit weight-only quantization to protect their precision",
+]
+answer = ["D"]
+explanation = """
+AWQ uses calibration activations to find the small fraction of important weight channels and
+protects them through per-channel scaling, then quantizes weights to INT4 (weight-only). It speeds
+up memory-bound decode. Activations stay in higher precision, it's post-training (not QAT), and it doesn't prune.
+"""
+
+[[questions]]
+id = "05-25"
+topic = "GPTQ"
+question = "How does GPTQ quantize a model's weights?"
+options = [
+  "Layer by layer, using a small calibration set and approximate second-order (Hessian) information to adjust the remaining weights so each layer's output error stays small",
+  "By training the full model with fake quantization for several epochs",
+  "By rounding every weight to the nearest integer independently",
+  "By converting the model to FP8",
+]
+answer = ["A"]
+explanation = """
+GPTQ is post-training quantization. As it quantizes a layer's weights column by column, it updates
+the not-yet-quantized weights to compensate for the error, using the calibration inputs' second-order
+statistics. That's what makes 3–4-bit weight-only models accurate. It isn't QAT, naive rounding or FP8.
+"""
+
+[[questions]]
+id = "05-26"
+topic = "FP8 formats"
+question = "In FP8 training with NVIDIA Transformer Engine on Hopper GPUs, how are the two FP8 formats typically used?"
+options = [
+  "E5M2 for weights, E4M3 for the optimizer states",
+  "E4M3 only; E5M2 is for inference",
+  "E4M3 (more precision) for forward weights and activations, and E5M2 (more range) for gradients",
+  "Both formats are identical; the choice doesn't matter",
+]
+answer = ["C"]
+explanation = """
+Gradients span a wide dynamic range, so they need E5M2's extra exponent bit. Forward tensors benefit
+from E4M3's extra mantissa bit. Transformer Engine manages per-tensor scale factors (delayed scaling
+from an amax history). Optimizer states stay in higher precision.
+"""
+
+[[questions]]
+id = "05-27"
+topic = "TF32"
+question = "What is TF32 on NVIDIA Ampere and later GPUs?"
+options = [
+  "A 32-bit integer format for quantized inference",
+  "A tensor-core math mode with FP32's 8-bit exponent (range) and a 10-bit mantissa, used to accelerate FP32 matmuls",
+  "A compressed file format for model weights",
+  "A version of FP16 with a larger mantissa",
+]
+answer = ["B"]
+explanation = """
+TF32 keeps FP32 range but uses reduced precision inside tensor-core matmuls, giving large speed-ups
+for FP32 code with little accuracy impact. Values are still stored as FP32. It isn't integer
+quantization, a file format, or an FP16 variant.
+"""
+
+[[questions]]
+id = "05-28"
+topic = "Chunked prefill"
+question = """
+When a request with a 30k-token prompt arrives, other users' streaming responses stall for
+seconds. Which scheduler feature addresses this?
+"""
+options = [
+  "Speculative decoding",
+  "Increasing max_tokens",
+  "Weight-only INT4 quantization",
+  "Chunked prefill: split the long prompt's prefill into chunks interleaved with other sequences' decode steps",
+]
+answer = ["D"]
+explanation = """
+A long prefill monopolises the GPU, so everyone else's inter-token latency spikes. Chunking the
+prefill lets decode steps for other requests run in between, which smooths latency at a small cost
+to that request's TTFT. The other options target decode speed or output length, not prefill interference.
+"""
+
+[[questions]]
+id = "05-29"
+topic = "Draft heads"
+question = "How do methods such as Medusa and EAGLE differ from classic speculative decoding with a separate draft model?"
+options = [
+  "They add lightweight extra heads or layers to the target model itself to propose several future tokens, avoiding a separate draft model",
+  "They quantize the draft model to 1 bit",
+  "They change the target model's output distribution to speed things up",
+  "They only work at very large batch sizes",
+]
+answer = ["A"]
+explanation = """
+Instead of running a second model, small trained heads on top of the target's hidden states predict
+several tokens ahead, and the target verifies them in one pass, as in standard speculative decoding.
+The verification keeps outputs faithful to the target, and gains are largest at low batch.
+"""
+
+[[questions]]
+id = "05-30"
+topic = "CUDA graphs"
+question = """
+Serving a small model at batch size 1, profiling shows the GPU is mostly idle between many tiny
+kernels. Which optimisation targets this?
+"""
+options = [
+  "Larger LoRA rank",
+  "FP32 inference",
+  "CUDA graphs (or fused kernels), which capture a sequence of kernel launches once and replay them with minimal CPU launch overhead",
+  "More DataLoader workers",
+]
+answer = ["C"]
+explanation = """
+At small batch, each decode step is many short kernels, and CPU-side launch overhead dominates.
+CUDA graphs and kernel fusion (both used by TensorRT-LLM) remove most of it. LoRA rank and FP32
+don't help, and data loaders are a training concern.
+"""
+
+[[questions]]
+id = "05-31"
+topic = "Kernel fusion"
+question = "Why does fusing element-wise operations (bias add, activation, residual add) into a preceding matmul kernel speed up inference?"
+options = [
+  "It reduces the number of FLOPs of the matmul",
+  "Element-wise operations are memory-bound; fusion avoids writing intermediate tensors to HBM and reading them back",
+  "It increases numerical precision",
+  "It allows larger batch sizes by compressing weights",
+]
+answer = ["B"]
+explanation = """
+An unfused bias-add reads and writes a whole tensor from GPU memory to do one addition per element.
+Fusion applies it while the matmul output is still on-chip, which saves memory traffic and kernel
+launches. FLOPs, precision and weight size are unchanged.
+"""
+
+[[questions]]
+id = "05-32"
+topic = "Minitron"
+question = "What is NVIDIA's Minitron approach to building smaller models?"
+options = [
+  "Training small models from scratch on more data",
+  "Quantizing a large model to 2 bits",
+  "Using only the first half of a large model's layers without further training",
+  "Pruning a large pre-trained model (width and/or depth) and then recovering accuracy with knowledge distillation from the original, at a fraction of the cost of training from scratch",
+]
+answer = ["D"]
+explanation = """
+Minitron starts from a strong large model, removes less important neurons, heads or layers, and
+distils from the unpruned model, needing far fewer training tokens than a from-scratch run. It
+isn't quantization, and truncated layers without distillation lose a lot of accuracy.
+"""
+
+[[questions]]
+id = "05-33"
+topic = "TTFT calculation"
+question = """
+A server prefills at 20,000 tokens/s and decodes at 40 tokens/s per request. A request has a
+12,000-token prompt, of which 10,000 tokens are an already-cached shared prefix. What is the time to first token?
+"""
+options = [
+  "About 0.6 s",
+  "About 0.1 s",
+  "About 0.025 s",
+  "About 8 s",
+]
+answer = ["B"]
+explanation = """
+Only the 2,000 uncached tokens need prefill: 2,000 / 20,000 = 0.1 s. Without the cached prefix it
+would be 0.6 s. 0.025 s is the time per output token (1/40), and about 8 s is the end-to-end time for 300 output tokens.
+"""
+
+[[questions]]
+id = "05-34"
+topic = "Decode roofline"
+question = """
+An 8B model's weights are quantized to 4 bits (about 4 GB) and served at batch 1 on an L4 GPU with
+300 GB/s memory bandwidth. What is the approximate upper bound on generated tokens per second?
+"""
+options = [
+  "About 19 tokens/s",
+  "About 300 tokens/s",
+  "About 75 tokens/s",
+  "About 2,400 tokens/s",
+]
+answer = ["C"]
+explanation = """
+Each decode step reads all weights once: 300 GB/s ÷ 4 GB ≈ 75 steps (tokens) per second. In FP16
+(16 GB) the bound is about 19 tokens/s, which is why weight quantization speeds up memory-bound
+decode about 4×. Real throughput is lower (KV-cache reads, overheads).
+"""
+
+[[questions]]
+id = "05-35"
+topic = "Mixed precision"
+question = "Under PyTorch autocast mixed precision, which operations are typically kept in FP32 for numerical safety? (Select TWO.)"
+options = [
+  "Softmax and normalisation layers, which involve exponentials, sums and divisions over many values",
+  "Loss computation (for example cross-entropy over a large vocabulary)",
+  "Large matrix multiplications",
+  "Convolutions and linear layers",
+  "Embedding lookups",
+]
+answer = ["A", "B"]
+explanation = """
+Reductions and exponentials lose accuracy or overflow in low precision, so autocast runs them in
+FP32. Matmuls and linear layers are exactly what should run in FP16/BF16 on tensor cores for speed,
+and embedding lookups are just memory reads.
+"""
+
+[[questions]]
+id = "05-36"
+topic = "Calibration data"
+question = """
+After INT8 post-training quantization with a calibration set of Wikipedia text, a code-generation
+model's accuracy drops much more than expected. What is the most likely cause?
+"""
+options = [
+  "INT8 is never suitable for code models",
+  "The calibration set was too large",
+  "The calibration data didn't represent the production inputs (code), so activation ranges and scales were estimated poorly",
+  "Wikipedia text contains too much PII",
+]
+answer = ["C"]
+explanation = """
+PTQ sets scales from the activation statistics seen during calibration. If calibration inputs
+differ from real traffic, the ranges are wrong and quantization error grows. Use a few hundred
+representative samples. INT8 generally works for code, size isn't the problem, and PII is irrelevant to scale estimation.
+"""
+
+[[questions]]
+id = "05-37"
+topic = "Speculative decoding tuning"
+question = """
+A draft model's tokens are accepted about 50% of the time. Increasing the draft length from 4 to 8
+tokens barely improves speed. Why?
+"""
+options = [
+  "Speculative decoding only works with 4 draft tokens",
+  "The target model rejects every draft token after the fourth",
+  "At a 50% acceptance rate the chance that a whole long draft survives falls off quickly: expected tokens per target pass go only from about 1.94 to 2.0, while drafting costs more",
+  "The KV cache is full",
+]
+answer = ["C"]
+explanation = """
+Expected accepted tokens = (1 − α^(γ+1)) / (1 − α). With α = 0.5 that approaches 2 no matter how long
+the draft is. Long drafts pay off only when acceptance is high (at α = 0.9: 4.1 tokens with γ = 4, 6.1 with γ = 8).
+Improve the draft model's agreement, or keep γ small.
+"""
+
+[[questions]]
+id = "05-38"
+topic = "Throughput metrics"
+question = "An inference team reports only 'tokens per second per GPU'. Which additional metrics are needed to judge user experience for an interactive chatbot? (Select TWO.)"
+options = [
+  "Time to first token (TTFT), typically at P95",
+  "Inter-token latency / time per output token (ITL, TPOT)",
+  "Total parameter count",
+  "Number of attention heads",
+  "Training loss",
+]
+answer = ["A", "B"]
+explanation = """
+Throughput measures efficiency, but users feel how fast the answer starts and how smoothly it
+streams. High throughput from huge batches can come with poor TTFT or ITL. Tools such as GenAI-Perf
+report all of them. Model size, heads and training loss don't measure serving experience.
+"""
+
+[[questions]]
+id = "05-39"
+topic = "Fused optimizers"
+question = "Why do training frameworks offer fused optimizer implementations (for example fused AdamW)?"
+options = [
+  "They use less memory for optimizer states",
+  "They update all parameters in a few large kernels instead of many small per-tensor kernels, reducing launch overhead and memory traffic",
+  "They change the optimisation algorithm to converge faster",
+  "They are required for mixed precision",
+]
+answer = ["B"]
+explanation = """
+A naive optimizer step launches several element-wise kernels per parameter tensor, and a large
+model has hundreds of tensors. Fusing them into multi-tensor kernels makes the optimizer step much
+faster. The maths, the state memory and mixed-precision support are the same.
+"""
+
+[[questions]]
+id = "05-40"
+topic = "Disaggregated serving"
+question = """
+Long prompts make prefill interfere with decode on the same GPUs, and the two phases need
+different amounts of compute and memory bandwidth. What serving architecture addresses this?
+"""
+options = [
+  "Running every request at batch size 1",
+  "Disabling the KV cache",
+  "Moving all inference to CPUs",
+  "Disaggregated serving: run prefill and decode on separate GPU pools and transfer the KV cache between them, sizing each pool for its phase",
+]
+answer = ["D"]
+explanation = """
+Prefill is compute-bound and bursty, while decode is memory-bandwidth-bound and steady. Separating
+them (as NVIDIA Dynamo and other disaggregated serving systems do) removes interference and lets
+each pool be scaled and tuned independently. Batch size 1 wastes the GPU, and disabling the KV
+cache or moving to CPUs makes everything slower.
+"""
