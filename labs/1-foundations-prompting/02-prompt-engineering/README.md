@@ -84,6 +84,8 @@ processors. These mask invalid tokens at every step, so the output is valid by c
 
 ## Exercises (`exercises.py`)
 
+Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through every one step by step.
+
 | # | Function | Concept |
 |---|---|---|
 | 1 | `build_prompt` | zero / one / few-shot prompt assembly |

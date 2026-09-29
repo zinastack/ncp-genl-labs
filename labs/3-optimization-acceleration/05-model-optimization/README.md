@@ -118,6 +118,8 @@ pinned memory and prefetch so the GPU never waits on input.
 
 ## Exercises (`exercises.py`)
 
+Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through every one step by step.
+
 | # | Function | Concept |
 |---|---|---|
 | 1 | `training_memory_bytes` | 16 B/param rule, LoRA, QLoRA |

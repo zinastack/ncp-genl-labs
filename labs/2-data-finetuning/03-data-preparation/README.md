@@ -86,6 +86,8 @@ out-trains a larger noisy one, especially for fine-tuning (LIMA: ~1k curated exa
 
 ## Exercises (`exercises.py`)
 
+Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through every one step by step.
+
 | # | Function | Concept |
 |---|---|---|
 | 1 | `normalize_text` | Unicode NFKC, control chars, whitespace |

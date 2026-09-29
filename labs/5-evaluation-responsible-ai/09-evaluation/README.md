@@ -71,6 +71,8 @@ periodic **agreement checks with humans** (κ).
 
 ## Exercises (`exercises.py`)
 
+Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through every one step by step.
+
 | # | Function | Concept |
 |---|---|---|
 | 1 | `perplexity` | LM quality |

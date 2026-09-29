@@ -6,6 +6,7 @@ Every lab combines three things:
 
 1. **Review notes** (`README.md`): the concepts, numbers and exam traps for one blueprint domain.
 2. **Exercises you implement** (`exercises.py`), checked by tests. They run on a laptop CPU in seconds.
+   **`SOLUTION.md`** then explains every solution step by step, with worked numbers.
 3. **Exam-style questions** (`quiz.toml`): 138 scenario questions with explanations, including a timed mock exam.
 
 Each lab also has a **GPU part** (`gpu_lab.py` plus section `make` targets) that runs your code on
@@ -39,7 +40,8 @@ make quiz-01            # exam questions for domain 01
 The loop for each lab:
 
 1. Read `labs/<section>/<lab>/README.md`.
-2. Implement `exercises.py` until `make test-NN` is green. Check `solutions.py` only when stuck.
+2. Implement `exercises.py` until `make test-NN` is green. When stuck, or after finishing each
+   exercise, read its section in `SOLUTION.md` (why each line exists, worked numbers, exam link).
 3. `make quiz-NN` until you are consistently above 80%.
 4. On a GPU instance: `make gpu-NN` (or `USE_EXERCISES=1 make gpu-NN` to drive real models with your code).
 
@@ -77,7 +79,8 @@ labs/<N>-<section>/
   <NN>-<lab>/
     README.md            review notes
     exercises.py         ← you implement
-    solutions.py         reference implementation
+    SOLUTION.md          step-by-step walkthrough of every exercise, with worked numbers
+    solutions.py         reference implementation (commented)
     test_lab.py          checks for both
     quiz.toml            exam-style questions
     gpu_lab.py           GPU part (# %% cells: run as a script, in VS Code, or as a generated notebook)

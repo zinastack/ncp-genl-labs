@@ -97,6 +97,8 @@ are compute-bound; decode, element-wise ops and norms are memory-bound, which is
 
 ## Exercises (`exercises.py`)
 
+Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through every one step by step.
+
 | # | Function | Concept |
 |---|---|---|
 | 1 | `zero_bytes_per_gpu` | ZeRO stages 0–3 / FSDP |

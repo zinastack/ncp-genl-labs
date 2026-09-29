@@ -82,6 +82,8 @@ dramatically. Adapters are MBs, so you can keep **many adapters for one base mod
 
 ## Exercises (`exercises.py`)
 
+Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through every one step by step.
+
 | # | Function / class | Concept |
 |---|---|---|
 | 1 | `LoRALinear` (forward + `merge`) | low-rank update, zero-init B, α/r scaling |

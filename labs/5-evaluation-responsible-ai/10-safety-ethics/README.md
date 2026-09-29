@@ -87,6 +87,8 @@ continuously after; track the **attack success rate**.
 
 ## Exercises (`exercises.py`)
 
+Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through every one step by step.
+
 | # | Function / class | Concept |
 |---|---|---|
 | 1 | `selection_rates`, `demographic_parity_difference`, `disparate_impact_ratio` | group fairness |

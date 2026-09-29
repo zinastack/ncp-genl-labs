@@ -89,6 +89,8 @@ version_policy: { latest: { num_versions: 1 } }
 
 ## Exercises (`exercises.py`)
 
+Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through every one step by step.
+
 | # | Function | Concept |
 |---|---|---|
 | 1 | `triton_config` | write a config.pbtxt with dynamic batching and instance groups |
