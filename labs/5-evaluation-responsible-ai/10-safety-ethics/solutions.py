@@ -7,6 +7,8 @@ import re
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 
+import numpy as np
+
 REQUIRED_CARD_SECTIONS = (
     "intended_use", "out_of_scope_use", "training_data", "evaluation",
     "bias_and_fairness", "limitations", "license",
@@ -124,3 +126,56 @@ def attack_success_rate(results: list[dict]) -> dict[str, float]:
 def model_card_gaps(card: dict) -> list[str]:
     # Missing OR blank (whitespace-only) sections both count as undocumented.
     return [s for s in REQUIRED_CARD_SECTIONS if not str(card.get(s, "")).strip()]
+
+
+def retrieval_rail(chunks: list[str]) -> tuple[list[str], list[int]]:
+    # Indirect prompt injection arrives through retrieved documents, not the user. Drop chunks that
+    # carry instructions aimed at the model, and mask PII in the ones we keep.
+    kept, dropped = [], []
+    for i, chunk in enumerate(chunks):
+        if detect_prompt_injection(chunk):
+            dropped.append(i)
+        else:
+            kept.append(_mask_pii(chunk))
+    return kept, dropped
+
+
+def topic_rail(query_embedding: np.ndarray, allowed_topics: dict[str, np.ndarray], threshold: float) -> str | None:
+    # Topical rail: embed the request and compare with centroids of allowed topics. Below the
+    # threshold for every topic → off-topic → the bot declines instead of calling the LLM.
+    q = query_embedding / np.linalg.norm(query_embedding)
+    best, best_sim = None, threshold
+    for name, centroid in allowed_topics.items():
+        sim = float(q @ (centroid / np.linalg.norm(centroid)))
+        if sim >= best_sim:
+            best, best_sim = name, sim
+    return best
+
+
+def memorization_leaks(generations: list[str], canaries: list[str]) -> list[str]:
+    # Canaries: unique secret strings deliberately planted in training data. If the model reproduces
+    # one when prompted, it memorised training data, which is evidence of a privacy risk.
+    text = "\n".join(generations).lower()
+    return [c for c in canaries if c.lower() in text]
+
+
+AI_ACT_PROHIBITED = {
+    "social_scoring", "manipulative_techniques", "exploiting_vulnerabilities",
+    "untargeted_facial_scraping", "emotion_recognition_work_or_school",
+}
+AI_ACT_HIGH_RISK = {
+    "employment", "education", "credit_scoring", "essential_services", "critical_infrastructure",
+    "law_enforcement", "migration_border", "justice", "biometric_identification",
+}
+
+
+def ai_act_risk_tier(use_case: str, interacts_with_people: bool, generates_synthetic_content: bool) -> str:
+    # The EU AI Act regulates by USE, not by model: the same LLM can be minimal-risk in one product
+    # and high-risk in another. (General-purpose AI models have separate provider obligations.)
+    if use_case in AI_ACT_PROHIBITED:
+        return "prohibited"  # banned practices (Article 5)
+    if use_case in AI_ACT_HIGH_RISK:
+        return "high"  # Annex III areas: risk management, data governance, logging, human oversight
+    if interacts_with_people or generates_synthetic_content:
+        return "limited"  # transparency duties: disclose AI interaction, label synthetic content
+    return "minimal"

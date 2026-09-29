@@ -7,6 +7,8 @@ import re
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 
+import numpy as np
+
 REQUIRED_CARD_SECTIONS = (
     "intended_use", "out_of_scope_use", "training_data", "evaluation",
     "bias_and_fairness", "limitations", "license",
@@ -105,4 +107,46 @@ def attack_success_rate(results: list[dict]) -> dict[str, float]:
 # 7 ─────────────────────────────────────────────────────────────────────────────
 def model_card_gaps(card: dict) -> list[str]:
     """REQUIRED_CARD_SECTIONS missing from `card` or present but empty/whitespace, in order."""
+    raise NotImplementedError
+
+
+# 8 ─────────────────────────────────────────────────────────────────────────────
+def retrieval_rail(chunks: list[str]) -> tuple[list[str], list[int]]:
+    """Retrieval rail for RAG. Drop every chunk where detect_prompt_injection finds a pattern;
+    in the chunks you keep, mask PII exactly as in exercise 5 (emails → [EMAIL], US phones like
+    555-123-4567 → [PHONE]). Return (kept chunks in order, indices of dropped chunks).
+    """
+    raise NotImplementedError
+
+
+# 9 ─────────────────────────────────────────────────────────────────────────────
+def topic_rail(query_embedding: np.ndarray, allowed_topics: dict[str, np.ndarray], threshold: float) -> str | None:
+    """Topical rail. Return the allowed topic whose centroid has the highest cosine similarity to
+    the query, provided that similarity is ≥ threshold; otherwise None (off-topic).
+    """
+    raise NotImplementedError
+
+
+# 10 ────────────────────────────────────────────────────────────────────────────
+def memorization_leaks(generations: list[str], canaries: list[str]) -> list[str]:
+    """Return the canary strings (in the given order) that appear in any generation, case-insensitively."""
+    raise NotImplementedError
+
+
+# 11 ────────────────────────────────────────────────────────────────────────────
+AI_ACT_PROHIBITED = {
+    "social_scoring", "manipulative_techniques", "exploiting_vulnerabilities",
+    "untargeted_facial_scraping", "emotion_recognition_work_or_school",
+}
+AI_ACT_HIGH_RISK = {
+    "employment", "education", "credit_scoring", "essential_services", "critical_infrastructure",
+    "law_enforcement", "migration_border", "justice", "biometric_identification",
+}
+
+
+def ai_act_risk_tier(use_case: str, interacts_with_people: bool, generates_synthetic_content: bool) -> str:
+    """Simplified EU AI Act tiering: "prohibited" if use_case is in AI_ACT_PROHIBITED; else "high" if
+    in AI_ACT_HIGH_RISK; else "limited" if the system interacts with people or generates synthetic
+    content (transparency duties); else "minimal".
+    """
     raise NotImplementedError

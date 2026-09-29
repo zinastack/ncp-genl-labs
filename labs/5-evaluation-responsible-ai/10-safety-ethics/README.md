@@ -98,3 +98,9 @@ Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through ever
 | 5 | `GuardrailedLLM` | input rails, output rails and PII masking around any LLM |
 | 6 | `attack_success_rate` | red-team metric |
 | 7 | `model_card_gaps` | transparency and documentation |
+| 8 | `retrieval_rail` | retrieval rail against indirect prompt injection (+ PII masking) |
+| 9 | `topic_rail` | embedding-based topical rail: decline off-topic requests |
+| 10 | `memorization_leaks` | canary-based privacy / memorisation testing |
+| 11 | `ai_act_risk_tier` | EU AI Act risk tiers and what each implies |
+
+Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`](SOLUTION.md).

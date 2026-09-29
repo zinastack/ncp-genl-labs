@@ -203,3 +203,226 @@ topics, PII handling, domain rules) and adversarial robustness need explicit run
 Guardrails don't change weights. They screen and steer inputs and outputs, and both layers should
 be evaluated.
 """
+
+[[questions]]
+id = "10-11"
+topic = "Retrieval rails"
+question = """
+Input rails screen every user message, yet a RAG agent still follows malicious instructions
+embedded in a retrieved web page. Which additional control addresses this path most directly?
+"""
+options = [
+  "A retrieval rail that inspects retrieved chunks and drops or sanitises those containing instructions aimed at the model (plus output rails for leaks)",
+  "A stricter input rail on the user message",
+  "Raising the model's temperature",
+  "Retrieving more chunks per query",
+]
+answer = ["A"]
+explanation = """
+Indirect injection bypasses input rails because it arrives through retrieval, not from the user.
+Screening retrieved content before it enters the prompt, together with output rails, covers that
+path. A stricter input rail still never sees the page, temperature is irrelevant, and more chunks
+only add more untrusted text.
+"""
+
+[[questions]]
+id = "10-12"
+topic = "Topic control"
+question = "How does an embedding-based topical rail decide that a request is off-topic?"
+options = [
+  "It counts the number of words in the request",
+  "It embeds the request and declines when its similarity to every allowed topic (or example intent) is below a threshold, without calling the main LLM",
+  "It checks whether the request contains a question mark",
+  "It asks the main LLM to answer first and then filters the answer",
+]
+answer = ["B"]
+explanation = """
+Comparing the request's embedding with allowed topics or canonical intents (as NeMo Guardrails
+dialog rails do) catches off-topic requests before generation, which is cheaper and safer. Length and
+punctuation say nothing about topic, and generating first wastes compute and risks harmful output.
+"""
+
+[[questions]]
+id = "10-13"
+topic = "Memorisation testing"
+question = "How can a team measure whether a fine-tuned model memorises and can leak its training data?"
+options = [
+  "By measuring the model's perplexity on Wikipedia",
+  "By counting its parameters",
+  "By planting unique canary strings in the training data and probing whether the model reproduces them, alongside extraction attacks on known sensitive records",
+  "By checking GPU memory usage during inference",
+]
+answer = ["C"]
+explanation = """
+Canaries are unique strings that can only come from training, so reproducing one is direct evidence
+of memorisation, and the extraction rate quantifies the risk. Perplexity on unrelated data, parameter
+counts and GPU memory don't test for leakage.
+"""
+
+[[questions]]
+id = "10-14"
+topic = "EU AI Act transparency"
+question = "Under the EU AI Act, what is the main obligation for a limited-risk customer-service chatbot?"
+options = [
+  "A full conformity assessment before deployment",
+  "Transparency: users must be informed that they are interacting with an AI system (and AI-generated content must be marked as such)",
+  "It is prohibited",
+  "No obligations of any kind",
+]
+answer = ["B"]
+explanation = """
+Limited-risk systems carry transparency duties, such as disclosing the AI interaction and labelling
+synthetic content like deepfakes. Conformity assessments belong to high-risk systems, prohibition
+applies to banned practices such as social scoring, and "no obligations" is the minimal-risk tier.
+"""
+
+[[questions]]
+id = "10-15"
+topic = "EU AI Act prohibited practices"
+question = "Which of these AI uses falls under the EU AI Act's prohibited practices?"
+options = [
+  "A spam filter for corporate email",
+  "A chatbot that answers product questions",
+  "A credit-scoring model used by a bank",
+  "A social scoring system that rates citizens' trustworthiness based on their social behaviour, leading to detrimental treatment",
+]
+answer = ["D"]
+explanation = """
+Social scoring is among the practices banned outright. Credit scoring is high-risk (allowed, with
+obligations), a product chatbot is limited-risk (transparency), and a spam filter is minimal-risk.
+"""
+
+[[questions]]
+id = "10-16"
+topic = "NIST AI RMF"
+question = "What are the four core functions of the NIST AI Risk Management Framework?"
+options = [
+  "Govern, Map, Measure, Manage",
+  "Plan, Build, Test, Deploy",
+  "Identify, Protect, Detect, Respond",
+  "Collect, Train, Evaluate, Serve",
+]
+answer = ["A"]
+explanation = """
+The NIST AI RMF organises AI risk work into Govern (policies, accountability), Map (context and
+risks), Measure (assess and track risks) and Manage (prioritise and act). Identify/Protect/Detect/
+Respond comes from the NIST Cybersecurity Framework, and the others are generic lifecycle stages.
+"""
+
+[[questions]]
+id = "10-17"
+topic = "Conflicting fairness metrics"
+question = """
+A loan model satisfies equalized odds (equal true- and false-positive rates across groups) but
+not demographic parity, because the groups' base rates differ. What is the correct interpretation?
+"""
+options = [
+  "The model must be broken, since all fairness metrics should be satisfied together",
+  "Demographic parity is always the legally required metric",
+  "Fairness criteria can be mutually incompatible when base rates differ; the team must choose the criterion appropriate for the use case and document the rationale",
+  "Equalized odds is meaningless for loans",
+]
+answer = ["C"]
+explanation = """
+Impossibility results show that with different base rates, criteria such as demographic parity and
+equalized odds generally can't all hold at once. Responsible practice is an explicit, documented
+choice based on context and law, with per-group results reported. No single metric is universally
+required.
+"""
+
+[[questions]]
+id = "10-18"
+topic = "Bias in safety filters"
+question = """
+A toxicity classifier used as an output rail flags harmless messages written in certain dialects
+far more often than equivalent messages in standard English. What should the team do?
+"""
+options = [
+  "Nothing; safety filters can't be biased",
+  "Remove all output rails",
+  "Audit the filter's false-positive rates per group (for example with counterfactual rewrites) and recalibrate or replace it, because guardrails themselves can introduce unfair treatment",
+  "Block all messages in those dialects",
+]
+answer = ["C"]
+explanation = """
+Safety classifiers learn from biased data too, and over-flagging some groups' speech is a
+documented problem. Auditing and fixing the rail is part of fairness work. Assuming filters are
+neutral, removing safety entirely, or blocking a group outright are all wrong.
+"""
+
+[[questions]]
+id = "10-19"
+topic = "Agent safety"
+question = """
+An LLM agent can call tools that send emails and modify a database. Which design principles reduce
+the damage a successful prompt injection could cause? (Select TWO.)
+"""
+options = [
+  "Least privilege: give the agent only the tools and permissions it needs, with scoped credentials",
+  "Human approval (or execution rails with strict validation) for irreversible or high-impact actions",
+  "Give the agent administrator access so it never fails",
+  "Let the model decide which safety checks to skip",
+  "Hide tool calls from logs",
+]
+answer = ["A", "B"]
+explanation = """
+Assume some injections will succeed and limit their impact: minimal permissions, validated tool
+inputs, and human-in-the-loop confirmation for risky actions. Administrator access, self-selected
+safety and unlogged actions maximise the damage and remove accountability.
+"""
+
+[[questions]]
+id = "10-20"
+topic = "Content provenance"
+question = "Which measures help downstream users identify AI-generated media? (Select TWO.)"
+options = [
+  "Invisible watermarking of generated content",
+  "Content-provenance metadata such as C2PA manifests describing how the content was created",
+  "Lowering the output resolution",
+  "Increasing the generation temperature",
+  "Removing all metadata from files",
+]
+answer = ["A", "B"]
+explanation = """
+Watermarks and signed provenance metadata let platforms and users detect or verify AI-generated
+content, and regulations increasingly expect this kind of labelling. Resolution and temperature
+don't identify anything, and stripping metadata removes provenance.
+"""
+
+[[questions]]
+id = "10-21"
+topic = "Human oversight"
+question = "What does meaningful human oversight of a high-risk AI system require in practice?"
+options = [
+  "A human signs off on the model once, before deployment",
+  "Humans can understand the system's outputs and limitations, monitor its operation, and override or stop decisions, with clear escalation paths and audit logs",
+  "A human reads a random 0.01% of outputs without any authority to act",
+  "Displaying a disclaimer on every page",
+]
+answer = ["B"]
+explanation = """
+Oversight means ongoing, effective control: interpretable outputs, trained reviewers who can
+intervene, override and escalate, and logs for accountability. One-time sign-off, reviewers without
+authority, and disclaimers don't provide control over decisions.
+"""
+
+[[questions]]
+id = "10-22"
+topic = "Jailbreaks"
+question = """
+Users bypass a model's safety behaviour by asking it to role-play a character "who has no rules".
+Which combination is the most robust response?
+"""
+options = [
+  "Add a single sentence to the system prompt forbidding role-play",
+  "Layered defences: jailbreak-detection input rails, output rails that check the response regardless of the framing, adversarial red-team data for alignment tuning, and ongoing attack-success-rate tracking",
+  "Disable the model",
+  "Increase max_tokens so the model explains its reasoning",
+]
+answer = ["B"]
+explanation = """
+Role-play is one of many jailbreak framings. Prompt instructions alone are easily bypassed.
+Classifier-based input rails, output checks that judge the content itself, alignment on adversarial
+examples, and continuous red-team measurement together raise the bar. Disabling the model isn't
+practical, and longer outputs don't add safety.
+"""
