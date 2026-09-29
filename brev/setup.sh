@@ -13,7 +13,7 @@
 set -euo pipefail
 
 LAB_SECTION="${LAB_SECTION:-all}"
-REPO_URL="${REPO_URL:-https://github.com/YOUR_GITHUB_USER/genl-labs.git}"
+REPO_URL="${REPO_URL:-https://github.com/zinastack/ncp-genl-labs.git}"
 SUDO=$([ "$(id -u)" -eq 0 ] && echo "" || echo "sudo")
 
 log()  { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
@@ -23,10 +23,10 @@ warn() { printf '\033[1;33m[warn] %s\033[0m\n' "$*"; }
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$here/../Makefile" ] && [ -d "$here/../labs" ]; then
   REPO="$(cd "$here/.." && pwd)"
-elif [ -d /home/ubuntu/genl-labs/labs ]; then
-  REPO=/home/ubuntu/genl-labs                      # where Brev clones the Launchable's repo
+elif [ -d /home/ubuntu/ncp-genl-labs/labs ]; then
+  REPO=/home/ubuntu/ncp-genl-labs                  # where Brev clones the Launchable's repo
 else
-  REPO="${HOME}/genl-labs"
+  REPO="${HOME}/ncp-genl-labs"
   git clone "$REPO_URL" "$REPO"
 fi
 cd "$REPO"

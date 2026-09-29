@@ -46,8 +46,8 @@ brev-up: ## Create a private GPU instance for section S, copy the repo, run setu
 brev-sync: ## Copy the current repo (tracked + untracked, not ignored) to the instance
 	$(call need_section)
 	git ls-files -co --exclude-standard -z | tar -czf $(BREV_TARBALL) --null -T -
-	$(BREV_RUN) copy --host $(BREV_TARBALL) $(INSTANCE):genl-labs.tgz < /dev/null
-	$(BREV_RUN) exec $(INSTANCE) --host "mkdir -p ~/genl-labs && tar -xzf ~/genl-labs.tgz -C ~/genl-labs && rm ~/genl-labs.tgz" < /dev/null
+	$(BREV_RUN) copy --host $(BREV_TARBALL) $(INSTANCE):ncp-genl-labs.tgz < /dev/null
+	$(BREV_RUN) exec $(INSTANCE) --host "mkdir -p ~/ncp-genl-labs && tar -xzf ~/ncp-genl-labs.tgz -C ~/ncp-genl-labs && rm ~/ncp-genl-labs.tgz" < /dev/null
 	@rm -f $(BREV_TARBALL)
 
 brev-hf-token: ## Copy your Hugging Face token (HF_TOKEN or HUGGING_FACE) to the instance, if set
@@ -60,7 +60,7 @@ brev-hf-token: ## Copy your Hugging Face token (HF_TOKEN or HUGGING_FACE) to the
 
 brev-setup-remote: ## Run brev/setup.sh for section S on the instance
 	$(call need_section)
-	$(BREV_RUN) exec $(INSTANCE) --host "cd ~/genl-labs && LAB_SECTION=$(S) bash brev/setup.sh" < /dev/null
+	$(BREV_RUN) exec $(INSTANCE) --host "cd ~/ncp-genl-labs && LAB_SECTION=$(S) bash brev/setup.sh" < /dev/null
 
 brev-shell: ## Open a shell on the section-S instance
 	$(call need_section)
@@ -72,7 +72,7 @@ brev-open: ## Open the section-S instance in VS Code
 
 brev-exec: ## Run a make target remotely, e.g. make brev-exec S=5 CMD="gpu-09"
 	$(call need_section)
-	$(BREV_RUN) exec $(INSTANCE) --host "cd ~/genl-labs && make $(CMD)" < /dev/null
+	$(BREV_RUN) exec $(INSTANCE) --host "cd ~/ncp-genl-labs && make $(CMD)" < /dev/null
 
 brev-forward: ## Forward a port to localhost, e.g. make brev-forward S=4 PORT=3000 (Grafana) or PORT=9090
 	$(call need_section)
@@ -81,7 +81,7 @@ brev-forward: ## Forward a port to localhost, e.g. make brev-forward S=4 PORT=30
 
 brev-get: ## Copy a file back, e.g. make brev-get S=3 FILE=labs/3-optimization-acceleration/06-gpu-acceleration/ddp_profile.nsys-rep
 	$(call need_section)
-	$(BREV_RUN) copy --host $(INSTANCE):genl-labs/$(FILE) . < /dev/null
+	$(BREV_RUN) copy --host $(INSTANCE):ncp-genl-labs/$(FILE) . < /dev/null
 
 brev-stop: ## Stop the section-S instance (compute billing stops; disk kept)
 	$(call need_section)

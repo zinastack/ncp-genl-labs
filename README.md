@@ -30,6 +30,7 @@ real models on a cheap cloud GPU (L4/T4 via Brev or AWS). See [brev/README.md](b
 ## Quick start (laptop, no GPU needed)
 
 ```bash
+git clone https://github.com/zinastack/ncp-genl-labs.git && cd ncp-genl-labs
 make setup              # .venv + numpy/torch/pytest (Python ≥ 3.10)
 make help               # everything you can do from the root
 make test-01            # run Lab 01's tests against YOUR exercises (all fail until you implement them)

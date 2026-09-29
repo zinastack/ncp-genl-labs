@@ -48,38 +48,20 @@ larger disk (`brev search gpu --min-disk 100`).
 
 ## Create the Launchables (one per section)
 
-Brev's CLI can **deploy** a Launchable (`make brev-launch S=3 LAUNCHABLE=env-...`) but can't
-**create** one: that happens in the web console's Launchable builder. Two things to know:
+The code source is the public repo **https://github.com/zinastack/ncp-genl-labs**. Brev clones it to
+`/home/ubuntu/ncp-genl-labs`. Brev's CLI can **deploy** a Launchable
+(`make brev-launch S=3 LAUNCHABLE=env-...`) but can't **create** one; that happens in the web console.
 
-- **Keep it private:** set visibility to **"Only my organization"**. New Launchables default to
-  **"Anyone with the link"**; the third option, "Everyone (published)", lists it publicly.
-- **Code source:** Brev's docs describe a **public** Git repository URL as the code source. Until you
-  publish the repo, use the CLI path above.
-
-When the repo is on GitHub, set `REPO_URL` in `brev/setup.sh` to its URL. In the Brev console,
-**Launchables → Create Launchable**:
-
-| Field | Value |
-|---|---|
-| **Code** | Git repository → `https://github.com/<you>/genl-labs` (Brev clones it to `/home/ubuntu/genl-labs`) |
-| **Runtime** | **VM Mode** (Ubuntu 22.04 + Docker + NVIDIA driver + CUDA) |
-| **Setup script** | paste the contents of `brev/setup.sh` |
-| **Launch parameter** | `LAB_SECTION` = `1`…`5` (or `all`) |
-| **Launch parameter (optional)** | `HF_TOKEN`: each deployer's own Hugging Face token. Not needed (all lab models are public) but avoids download rate limits. Setup saves it to `~/.cache/huggingface/token`. Never bake your own token into the Launchable. |
-| **Jupyter** | enabled (setup generates `gpu_lab.ipynb` next to every `gpu_lab.py`) |
-| **Secure links** | Section 4 only: `grafana` → port **3000**, `prometheus` → port **9090** |
-| **GPU** | from the table above |
-| **Disk** | 100 GiB |
-| **Name** | e.g. `NCP-GENL · Section 3 · Optimization & Acceleration (2×L4)` |
-
-Create five Launchables that differ only in `LAB_SECTION`, GPU and name, and share their links.
-Each one is a one-click, reproducible lab environment.
+**[`LAUNCHABLES.md`](LAUNCHABLES.md) has the exact settings for all five**: names, GPUs, launch
+parameter, secure links, descriptions, and the setup script to paste
+([`launchable-setup.sh`](launchable-setup.sh)). Keep each one on **"Only my organization"** while you
+test it (new Launchables default to *Anyone with the link*), and switch visibility when you open them.
 
 ## Using an instance
 
 ```bash
 brev shell <instance-name>          # or open Jupyter from the Brev console
-cd ~/genl-labs
+cd ~/ncp-genl-labs
 make doctor                         # GPU, driver, torch, docker
 make s3                             # list Section 3's targets
 make gpu-05                         # run Lab 05's GPU part
@@ -89,8 +71,8 @@ make s4-triton-up && make gpu-07    # Triton + perf_analyzer
 make s5-llm-up && make s5-guardrails
 ```
 
-Your exercises are the same files as on your laptop. Commit and push from the laptop, then
-`git pull` on the instance. Run the GPU parts with **your** code via
+On a Launchable the repo is the public version (empty exercise stubs). To bring your own
+solutions, use the CLI path above (`make brev-sync`), which copies your local working tree. Run the GPU parts with **your** code via
 `USE_EXERCISES=1 make gpu-02`.
 
 Port forwarding without secure links: `brev port-forward <instance> -p 3000:3000`.
@@ -105,7 +87,7 @@ Port forwarding without secure links: `brev port-forward <instance> -p 3000:3000
 
 1. AMI: **Deep Learning Base OSS Nvidia Driver GPU AMI (Ubuntu 22.04)** (driver, Docker and the NVIDIA Container Toolkit preinstalled).
 2. 100 GB gp3 root volume. Security group: SSH (22) from your IP only.
-3. `ssh ubuntu@<ip>`, then `git clone <repo> genl-labs && cd genl-labs && LAB_SECTION=3 bash brev/setup.sh`.
+3. `ssh ubuntu@<ip>`, then `git clone https://github.com/zinastack/ncp-genl-labs.git && cd ncp-genl-labs && LAB_SECTION=3 bash brev/setup.sh`.
 4. Reach Grafana and Prometheus through an SSH tunnel: `ssh -L 3000:localhost:3000 -L 9090:localhost:9090 ubuntu@<ip>`.
 5. **Stop or terminate** the instance afterwards. Spot instances cut the price by about 60–70% for these interruptible labs.
 
