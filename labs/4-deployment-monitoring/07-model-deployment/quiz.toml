@@ -304,3 +304,249 @@ maxUnavailable 0 means an old pod is removed only after a new one is ready. maxS
 extra pod, which needs one spare GPU, during the rollout. Readiness gating makes sure "ready"
 means the model can serve. Recreate and deleting the Deployment cause downtime.
 """
+
+[[questions]]
+id = "07-15"
+topic = "Ensembles"
+question = "In a Triton ensemble's input_map and output_map entries, what do the key and the value refer to?"
+options = [
+  "The key is the step model's own tensor name; the value is the ensemble-internal tensor name that connects steps",
+  "The key is the model version; the value is the model name",
+  "The key is the client's HTTP header; the value is the tensor name",
+  "Both refer to GPU device ids",
+]
+answer = ["A"]
+explanation = """
+Each step maps its model's input and output names to ensemble-level tensor names. When one step's
+output_map value equals another step's input_map value, Triton passes that tensor between them in
+memory. Versions are set by model_version, and neither HTTP headers nor device ids appear in these maps.
+"""
+
+[[questions]]
+id = "07-16"
+topic = "Model Analyzer"
+question = """
+Model Analyzer reports a configuration with 1,100 requests/s but P95 = 31 ms, and another with
+780 requests/s and P95 = 19 ms. The SLO is P95 ≤ 20 ms. Which should you deploy, and how do you get more throughput?
+"""
+options = [
+  "The 1,100 requests/s configuration, because throughput matters most",
+  "Neither; switch to CPU inference",
+  "The 780 requests/s configuration, and add replicas to reach the required total throughput",
+  "The 1,100 requests/s configuration with a longer queue delay",
+]
+answer = ["C"]
+explanation = """
+Constraints come first: only configurations meeting the SLO are eligible, and among them you take
+the highest throughput. Beyond that, scale horizontally with more replicas. A faster config that
+breaks the SLO fails users, CPU inference is slower, and a longer queue delay increases latency further.
+"""
+
+[[questions]]
+id = "07-17"
+topic = "Streaming"
+question = "Why do chat applications typically request streaming responses (\"stream\": true) from an LLM endpoint?"
+options = [
+  "Streaming makes the model generate tokens faster",
+  "Streaming reduces the number of tokens generated",
+  "Streaming is required for the OpenAI-compatible API",
+  "Tokens are sent as they are generated (Server-Sent Events), so users see output after the time to first token instead of waiting for the whole answer",
+]
+answer = ["D"]
+explanation = """
+Total generation time is unchanged, but perceived latency drops dramatically because text appears
+as soon as the first token is ready. Streaming doesn't speed up decoding or shorten outputs, and
+the API supports both modes.
+"""
+
+[[questions]]
+id = "07-18"
+topic = "NIM API"
+question = "An application already uses the OpenAI Python client. What is the simplest way to point it at a self-hosted NVIDIA NIM for LLMs?"
+options = [
+  "Rewrite the client to use the KServe v2 protocol",
+  "Change the client's base URL to the NIM endpoint (for example http://nim-host:8000/v1) and set the model name the NIM serves",
+  "Convert the model to ONNX first",
+  "Install Triton client libraries",
+]
+answer = ["B"]
+explanation = """
+NIM for LLMs exposes OpenAI-compatible routes such as /v1/chat/completions and /v1/models, so
+existing OpenAI clients work by changing the base URL and model name. KServe v2 is Triton's native
+protocol, and no model conversion or Triton client is needed.
+"""
+
+[[questions]]
+id = "07-19"
+topic = "Rolling updates"
+question = """
+A Deployment has 4 GPU replicas on a cluster with no spare GPUs. The rollout must not need extra
+GPUs. Which rolling-update settings allow the update, and what is the cost?
+"""
+options = [
+  "maxSurge 0, maxUnavailable 1: no extra GPU is needed, but capacity temporarily drops to 3 ready replicas",
+  "maxSurge 1, maxUnavailable 0: no extra GPU and no capacity loss",
+  "maxSurge 0, maxUnavailable 0: the rollout proceeds normally",
+  "Recreate strategy: no extra GPU and no downtime",
+]
+answer = ["A"]
+explanation = """
+Without spare GPUs, a new pod can only start after an old one frees its GPU, so capacity dips by
+maxUnavailable during each step. maxSurge 1 needs a free GPU for the extra pod. With both at 0 the
+rollout can't make progress, and Recreate stops all old pods first, which means downtime.
+"""
+
+[[questions]]
+id = "07-20"
+topic = "Blue-green"
+question = "What is the main resource cost of a blue-green deployment for a GPU inference service?"
+options = [
+  "It needs no extra resources",
+  "It requires CPU-only nodes",
+  "It needs capacity for two full environments (old and new) during the switch-over, which for GPU services means roughly double the GPUs for that period",
+  "It doubles the model's memory footprint permanently",
+]
+answer = ["C"]
+explanation = """
+Blue-green runs the new version fully alongside the old one and then switches traffic at once,
+which gives instant rollback but temporarily needs two complete deployments. That's expensive with
+GPUs, which is why rolling updates or canaries are common. The footprint returns to normal once the old environment is removed.
+"""
+
+[[questions]]
+id = "07-21"
+topic = "Reranking"
+question = "Why is a cross-encoder reranker used after, rather than instead of, a bi-encoder (embedding) retriever?"
+options = [
+  "Cross-encoders cannot score relevance",
+  "Bi-encoders are more accurate than cross-encoders",
+  "Rerankers only work on images",
+  "A cross-encoder scores each (query, passage) pair jointly, which is accurate but too slow to run over the whole corpus, so it reorders a small candidate set from the fast retriever",
+]
+answer = ["D"]
+explanation = """
+Bi-encoders embed documents once, offline, so search is fast, but relevance is judged from two
+independent vectors. Cross-encoders read query and passage together, which is more precise but
+needs one model call per pair. The two-stage design combines recall and speed with precision.
+"""
+
+[[questions]]
+id = "07-22"
+topic = "MIG"
+question = """
+Several small models each need only a few GB of GPU memory and little compute. Which feature lets
+one A100 or H100 serve them with isolated memory and compute?
+"""
+options = [
+  "Multi-Instance GPU (MIG), which partitions the GPU into isolated instances, each with its own memory and compute slices",
+  "NVLink",
+  "Tensor parallelism",
+  "Pipeline parallelism",
+]
+answer = ["A"]
+explanation = """
+MIG splits one GPU into up to 7 hardware-isolated instances that Kubernetes schedules as separate
+resources, which suits many small workloads with quality-of-service isolation. Time-slicing shares a
+GPU without isolation. NVLink connects GPUs, and TP and PP split one large model across GPUs, the opposite need.
+"""
+
+[[questions]]
+id = "07-23"
+topic = "Model warm-up"
+question = """
+The first requests after each Triton pod starts are much slower than the rest (lazy initialisation,
+CUDA graph capture, memory allocation). What reduces this?
+"""
+options = [
+  "Disabling dynamic batching",
+  "Configuring model warm-up (model_warmup in config.pbtxt) and gating readiness on it, so the pod receives traffic only after sample inferences have run",
+  "Increasing max_queue_delay_microseconds",
+  "Using the latest image tag",
+]
+answer = ["B"]
+explanation = """
+Warm-up requests run at load time, so one-off initialisation costs are paid before the readiness
+probe passes. Batching and queue delay don't address cold starts, and image tags have nothing to do with them.
+"""
+
+[[questions]]
+id = "07-24"
+topic = "Stateful models"
+question = "Which Triton scheduling feature ensures that all requests belonging to one stream (for example a streaming speech session) go to the same model instance, in order?"
+options = [
+  "Dynamic batching",
+  "Instance groups",
+  "Sequence batching, which tracks a correlation ID so a stateful model sees a sequence's requests in order on one instance",
+  "Ensembles",
+]
+answer = ["C"]
+explanation = """
+Stateful models keep internal state between requests. The sequence batcher routes requests by
+correlation ID and handles start and end flags. Dynamic batching groups independent requests,
+instance groups add parallel copies, and ensembles chain models.
+"""
+
+[[questions]]
+id = "07-25"
+topic = "Capacity planning"
+question = """
+Traffic is 300 requests/s with an average latency of 0.4 s, and each replica handles 24 concurrent
+requests efficiently. How many replicas are needed with 25% headroom?
+"""
+options = ["5", "6", "7", "8"]
+answer = ["C"]
+explanation = """
+Little's law gives 300 × 0.4 = 120 requests in flight. With 25% headroom that's 150. 150 / 24 = 6.25,
+which rounds up to 7 replicas. Without headroom it would be 120 / 24 = exactly 5.
+"""
+
+[[questions]]
+id = "07-26"
+topic = "GPU Operator"
+question = "What does the NVIDIA GPU Operator do in a Kubernetes cluster?"
+options = [
+  "Automates deploying the NVIDIA driver, container toolkit, device plugin, DCGM exporter and related components on GPU nodes",
+  "Trains models on Kubernetes",
+  "Replaces the Kubernetes scheduler",
+  "Provides an OpenAI-compatible API",
+]
+answer = ["A"]
+explanation = """
+The GPU Operator manages the software stack GPU nodes need: drivers, the container toolkit so pods
+can access GPUs, the device plugin that advertises nvidia.com/gpu, monitoring through DCGM, and MIG
+management. It doesn't train models, replace the scheduler, or serve APIs (that's NIM or Triton).
+"""
+
+[[questions]]
+id = "07-27"
+topic = "Serving LLMs with Triton"
+question = "How is an LLM typically served with Triton for high performance?"
+options = [
+  "With the Python backend running Hugging Face generate() for every request",
+  "As an ONNX model with dynamic batching",
+  "With CPU instance groups",
+  "With the TensorRT-LLM backend, which runs a compiled TensorRT-LLM engine with in-flight batching and a paged KV cache",
+]
+answer = ["D"]
+explanation = """
+The TensorRT-LLM backend brings the LLM-specific optimisations (continuous batching, paged KV,
+quantized kernels) into Triton. A Python backend with generate() lacks them. Plain dynamic batching
+is request-level, not token-level. CPU instances are far too slow for LLMs.
+"""
+
+[[questions]]
+id = "07-28"
+topic = "Container images"
+question = "A Dockerfile for a Triton Python-backend model downloads the model weights at container start. Pods take minutes to become ready and fail when the internet is unreachable. What is the better practice?"
+options = [
+  "Download the weights at every request",
+  "Bake the weights into the image at build time, or mount them from a volume or model cache, so pods start without network downloads",
+  "Increase the liveness probe frequency",
+  "Use the :latest base image",
+]
+answer = ["B"]
+explanation = """
+Start-up should be fast and self-contained. Pre-baked weights (as in this lab's Dockerfile) or a
+shared volume or model cache avoid the network dependency and shorten cold starts. Per-request
+downloads are absurd, more frequent liveness probes would kill loading pods sooner, and :latest makes builds unreproducible.
+"""

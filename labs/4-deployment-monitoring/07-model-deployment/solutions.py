@@ -3,6 +3,7 @@
 Every function is explained step by step, with worked numeric examples, in SOLUTION.md.
 """
 
+import json
 import math
 import re
 from collections.abc import Callable
@@ -153,3 +154,68 @@ def kserve_infer_request(
         "inputs": [{"name": input_name, "shape": [len(texts), 1], "datatype": "BYTES", "data": list(texts)}],
         "outputs": [{"name": n} for n in output_names],
     }
+
+
+def triton_ensemble_config(
+    name: str, inputs: list[tuple[str, str, list[int]]], outputs: list[tuple[str, str, list[int]]],
+    steps: list[tuple[str, dict[str, str], dict[str, str]]],
+) -> str:
+    # An ensemble chains models INSIDE Triton: tensors pass between steps in memory, with no extra
+    # network hops. Each step maps the model's own tensor names (keys) to ensemble tensor names (values).
+    def block(kind: str, mapping: dict[str, str]) -> str:
+        return " ".join(f'{kind} {{ key: "{k}" value: "{v}" }}' for k, v in mapping.items())
+
+    step_lines = ",\n".join(
+        f'    {{ model_name: "{model}" model_version: -1 {block("input_map", ins)} {block("output_map", outs)} }}'
+        for model, ins, outs in steps
+    )
+    return "\n".join([
+        f'name: "{name}"',
+        'platform: "ensemble"',  # no backend of its own: Triton's scheduler runs the steps
+        "max_batch_size: 0",
+        _tensors("input", inputs),
+        _tensors("output", outputs),
+        "ensemble_scheduling {\n  step [\n" + step_lines + "\n  ]\n}",
+    ]) + "\n"
+
+
+def pick_best_config(results: list[dict], max_p95_ms: float, max_gpu_mem_gb: float) -> dict | None:
+    # What Model Analyzer does after sweeping configs with perf_analyzer: discard configurations that
+    # break a constraint, then take the highest throughput among the rest.
+    feasible = [r for r in results if r["p95_ms"] <= max_p95_ms and r["gpu_mem_gb"] <= max_gpu_mem_gb]
+    return max(feasible, key=lambda r: r["throughput"], default=None)
+
+
+def openai_chat_request(
+    model: str, messages: list[dict[str, str]], max_tokens: int = 256, temperature: float = 0.0,
+    stream: bool = False,
+) -> dict:
+    # The body NIM (and vLLM, OpenAI) accept at POST /v1/chat/completions.
+    return {"model": model, "messages": messages, "max_tokens": max_tokens,
+            "temperature": temperature, "stream": stream}
+
+
+def parse_sse_stream(lines: list[str]) -> str:
+    # Streaming responses arrive as Server-Sent Events: "data: {json chunk}" lines, then "data: [DONE]".
+    text = []
+    for line in lines:
+        if not line.startswith("data: "):
+            continue  # blank keep-alive lines, comments
+        payload = line[len("data: "):].strip()
+        if payload == "[DONE]":
+            break
+        delta = json.loads(payload)["choices"][0].get("delta", {})
+        text.append(delta.get("content") or "")  # the first chunk often carries only the role
+    return "".join(text)
+
+
+def rollout_bounds(replicas: int, max_surge: int, max_unavailable: int) -> tuple[int, int]:
+    # During a RollingUpdate Kubernetes keeps total pods ≤ replicas + maxSurge and ready pods ≥
+    # replicas − maxUnavailable. For GPU pods, the surge is extra GPUs you must have free.
+    return replicas + max_surge, replicas - max_unavailable
+
+
+def rerank_top_n(query: str, candidates: list[str], score_fn: Callable[[str, str], float], top_n: int) -> list[str]:
+    # Retrieve many (high recall), then re-score each (query, passage) PAIR with a slower, more
+    # accurate cross-encoder and keep only the best few for the LLM (high precision).
+    return sorted(candidates, key=lambda c: -score_fn(query, c))[:top_n]

@@ -102,3 +102,64 @@ def kserve_infer_request(
          "outputs": [{"name": n} for n in output_names]}
     """
     raise NotImplementedError
+
+
+# 7 ─────────────────────────────────────────────────────────────────────────────
+def triton_ensemble_config(
+    name: str, inputs: list[tuple[str, str, list[int]]], outputs: list[tuple[str, str, list[int]]],
+    steps: list[tuple[str, dict[str, str], dict[str, str]]],
+) -> str:
+    """config.pbtxt for a Triton ENSEMBLE. Required (tests use regexes):
+        name: "<name>"
+        platform: "ensemble"
+        max_batch_size: 0
+        input [ ... ]  output [ ... ]          (same tensor format as triton_config)
+        ensemble_scheduling { step [ { model_name: "m" model_version: -1
+            input_map { key: "<model tensor>" value: "<ensemble tensor>" }
+            output_map { key: "<model tensor>" value: "<ensemble tensor>" } }, ... ] }
+    steps: (model_name, input_map dict, output_map dict), in execution order.
+    """
+    raise NotImplementedError
+
+
+# 8 ─────────────────────────────────────────────────────────────────────────────
+def pick_best_config(results: list[dict], max_p95_ms: float, max_gpu_mem_gb: float) -> dict | None:
+    """Model-Analyzer-style selection. results: dicts with "name", "throughput", "p95_ms",
+    "gpu_mem_gb". Return the highest-throughput result meeting BOTH limits, or None.
+    """
+    raise NotImplementedError
+
+
+# 9 ─────────────────────────────────────────────────────────────────────────────
+def openai_chat_request(
+    model: str, messages: list[dict[str, str]], max_tokens: int = 256, temperature: float = 0.0,
+    stream: bool = False,
+) -> dict:
+    """Body for POST /v1/chat/completions (NIM's OpenAI-compatible API):
+    {"model", "messages", "max_tokens", "temperature", "stream"}.
+    """
+    raise NotImplementedError
+
+
+def parse_sse_stream(lines: list[str]) -> str:
+    """Assemble streamed text. Relevant lines start with "data: "; stop at "data: [DONE]";
+    otherwise parse the JSON and append choices[0]["delta"].get("content") (may be missing or None).
+    Ignore other lines.
+    """
+    raise NotImplementedError
+
+
+# 10 ────────────────────────────────────────────────────────────────────────────
+def rollout_bounds(replicas: int, max_surge: int, max_unavailable: int) -> tuple[int, int]:
+    """Kubernetes RollingUpdate limits: (max total pods, min ready pods) =
+    (replicas + max_surge, replicas − max_unavailable).
+    """
+    raise NotImplementedError
+
+
+# 11 ────────────────────────────────────────────────────────────────────────────
+def rerank_top_n(query: str, candidates: list[str], score_fn: Callable[[str, str], float], top_n: int) -> list[str]:
+    """Second-stage reranking: score every (query, candidate) pair with score_fn (a cross-encoder)
+    and return the top_n candidates, best first.
+    """
+    raise NotImplementedError

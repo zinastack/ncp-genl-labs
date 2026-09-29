@@ -1,3 +1,4 @@
+import json
 import re
 
 import numpy as np
@@ -100,3 +101,53 @@ def test_shipped_triton_repository_is_valid(lab):
     import pathlib
     repo = pathlib.Path(__file__).parent / "triton" / "model_repository"
     assert lab.validate_model_repository(repo) == []
+
+
+def test_7_ensemble(lab):
+    cfg = lab.triton_ensemble_config(
+        "classify_pipeline",
+        [("RAW_TEXT", "TYPE_STRING", [1])], [("LABEL", "TYPE_STRING", [1])],
+        [("tokenizer", {"TEXT": "RAW_TEXT"}, {"INPUT_IDS": "ids"}),
+         ("bert_trt", {"INPUT_IDS": "ids"}, {"LOGITS": "logits"}),
+         ("postprocess", {"LOGITS": "logits"}, {"LABEL": "LABEL"})],
+    )
+    assert re.search(r'platform:\s*"ensemble"', cfg)
+    assert re.search(r'input\s*\[\s*\{\s*name:\s*"RAW_TEXT"', cfg)
+    steps = re.findall(r'model_name:\s*"(\w+)"', cfg)
+    assert steps == ["tokenizer", "bert_trt", "postprocess"], "steps in execution order"
+    assert re.search(r'input_map\s*\{\s*key:\s*"TEXT"\s*value:\s*"RAW_TEXT"\s*\}', cfg)
+    assert re.search(r'output_map\s*\{\s*key:\s*"LOGITS"\s*value:\s*"logits"\s*\}', cfg)
+
+
+def test_8_pick_best_config(lab):
+    results = [
+        {"name": "bs8_i1_d2ms", "throughput": 640, "p95_ms": 17.4, "gpu_mem_gb": 3},
+        {"name": "bs16_i2_d5ms", "throughput": 900, "p95_ms": 24.0, "gpu_mem_gb": 6},
+        {"name": "bs8_i2_d1ms", "throughput": 780, "p95_ms": 19.1, "gpu_mem_gb": 6},
+        {"name": "bs32_i4", "throughput": 1100, "p95_ms": 31.0, "gpu_mem_gb": 14},
+    ]
+    assert lab.pick_best_config(results, 20, 8)["name"] == "bs8_i2_d1ms"
+    assert lab.pick_best_config(results, 40, 8)["name"] == "bs16_i2_d5ms", "memory limit excludes bs32"
+    assert lab.pick_best_config(results, 5, 8) is None
+
+
+def test_9_openai_streaming(lab):
+    body = lab.openai_chat_request("meta/llama-3.1-8b-instruct", [{"role": "user", "content": "Hi"}], stream=True)
+    assert body == {"model": "meta/llama-3.1-8b-instruct", "messages": [{"role": "user", "content": "Hi"}],
+                    "max_tokens": 256, "temperature": 0.0, "stream": True}
+    chunk = lambda delta: "data: " + json.dumps({"choices": [{"delta": delta}]})
+    lines = [chunk({"role": "assistant"}), "", ": keep-alive", chunk({"content": "Hello"}),
+             chunk({"content": " world"}), chunk({"content": None}), "data: [DONE]", chunk({"content": "late"})]
+    assert lab.parse_sse_stream(lines) == "Hello world"
+
+
+def test_10_rollout_bounds(lab):
+    assert lab.rollout_bounds(3, 1, 0) == (4, 3), "never below 3 ready; needs 1 spare GPU"
+    assert lab.rollout_bounds(4, 0, 1) == (4, 3), "no spare GPU; temporarily 3 ready"
+
+
+def test_11_rerank(lab):
+    passages = ["NCCL all-reduce basics", "Triton exposes metrics on port 8002", "Grafana dashboards"]
+    overlap = lambda q, p: len(set(q.lower().split()) & set(p.lower().split()))
+    assert lab.rerank_top_n("which port for triton metrics", passages, overlap, 1) == [passages[1]]
+    assert len(lab.rerank_top_n("q", passages, overlap, 2)) == 2

@@ -99,6 +99,13 @@ Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through ever
 | 4 | `k8s_deployment`, `k8s_hpa` | GPU pod spec, probes, custom-metric autoscaling |
 | 5 | `replicas_needed` | Little's-law capacity planning |
 | 6 | `kserve_infer_request` | Triton / KServe v2 HTTP payload |
+| 7 | `triton_ensemble_config` | a pre-process → model → post-process pipeline inside Triton |
+| 8 | `pick_best_config` | Model-Analyzer-style config selection under latency/memory limits |
+| 9 | `openai_chat_request`, `parse_sse_stream` | NIM's OpenAI-compatible API and streaming (SSE) |
+| 10 | `rollout_bounds` | rolling-update capacity: maxSurge, maxUnavailable, spare GPUs |
+| 11 | `rerank_top_n` | two-stage RAG retrieval: recall first, then precision with a reranker |
+
+Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`](SOLUTION.md).
 
 GPU part: `triton/model_repository/text_classifier` (Python backend, HF DistilBERT on GPU),
 `client.py`, `docker-compose.yml`, and `k8s/` manifests.
