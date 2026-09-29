@@ -13,12 +13,12 @@ import numpy as np
 MERSENNE_P = (1 << 61) - 1  # a large prime: modular hashing mod a prime spreads values evenly
 
 
-def hash64(s):
+def hash64(s: str) -> int:
     # Stable across processes and machines (Python's hash() is randomly salted per process).
     return int.from_bytes(hashlib.md5(s.encode()).digest()[:8], "little")
 
 
-def normalize_text(text):
+def normalize_text(text: str) -> str:
     text = unicodedata.normalize("NFKC", text)  # Ｈ→H, ﬁ→fi: one canonical form per character
     # Drop invisible control characters, but keep \n and \t (tab is category Cc too, and we want
     # it collapsed to a space in the next step, not deleted).
@@ -29,7 +29,7 @@ def normalize_text(text):
     return text.strip()  # no lowercasing: case carries meaning
 
 
-def exact_dedup(docs):
+def exact_dedup(docs: list[str]) -> list[str]:
     seen, out = set(), []
     for doc in docs:
         h = hash64(normalize_text(doc))  # compare normalised text…
@@ -39,14 +39,14 @@ def exact_dedup(docs):
     return out
 
 
-def shingles(text, n=3):
+def shingles(text: str, n: int = 3) -> set[str]:
     words = text.lower().split()
     if len(words) < n:
         return {" ".join(words)}
     return {" ".join(words[i : i + n]) for i in range(len(words) - n + 1)}  # overlapping word n-grams
 
 
-def minhash_signature(shingle_set, num_perm=128, seed=0):
+def minhash_signature(shingle_set: set[str], num_perm: int = 128, seed: int = 0) -> np.ndarray:
     rng = np.random.default_rng(seed)  # same seed → same hash family for every document
     a = rng.integers(1, MERSENNE_P, num_perm)
     b = rng.integers(0, MERSENNE_P, num_perm)
@@ -57,11 +57,11 @@ def minhash_signature(shingle_set, num_perm=128, seed=0):
     return np.array(sig, dtype=np.uint64)
 
 
-def estimate_jaccard(sig_a, sig_b):
+def estimate_jaccard(sig_a: np.ndarray, sig_b: np.ndarray) -> float:
     return float(np.mean(sig_a == sig_b))  # fraction of agreeing minima ≈ Jaccard
 
 
-def quality_issues(text):
+def quality_issues(text: str) -> list[str]:
     words = text.split()
     n = len(words)
     issues = []  # return reasons, not just keep/drop, so filtering is explainable
@@ -90,13 +90,13 @@ _PII = [
 ]
 
 
-def redact_pii(text):
+def redact_pii(text: str) -> str:
     for placeholder, pattern in _PII:
         text = pattern.sub(placeholder, text)
     return text
 
 
-def _merge_word(symbols, pair):
+def _merge_word(symbols: list[str], pair: tuple[str, str]) -> list[str]:
     # Replace every adjacent occurrence of `pair` in the symbol list with the merged symbol.
     out, i = [], 0
     while i < len(symbols):
@@ -109,7 +109,7 @@ def _merge_word(symbols, pair):
     return out
 
 
-def train_bpe(word_freqs, num_merges):
+def train_bpe(word_freqs: dict[str, int], num_merges: int) -> list[tuple[str, str]]:
     vocab = {word: list(word) for word in word_freqs}  # every word starts as characters
     merges = []
     for _ in range(num_merges):
@@ -126,14 +126,14 @@ def train_bpe(word_freqs, num_merges):
     return merges
 
 
-def bpe_encode(word, merges):
+def bpe_encode(word: str, merges: list[tuple[str, str]]) -> list[str]:
     symbols = list(word)
     for pair in merges:  # learned order = priority order
         symbols = _merge_word(symbols, pair)
     return symbols
 
 
-def pack_sequences(seqs, max_len, eos_id):
+def pack_sequences(seqs: list[list[int]], max_len: int, eos_id: int) -> list[list[int]]:
     packs, current = [], []
     for seq in seqs:
         item = (list(seq) + [eos_id])[:max_len]  # EOS separates examples; truncate oversize ones
@@ -146,7 +146,7 @@ def pack_sequences(seqs, max_len, eos_id):
     return packs
 
 
-def padding_efficiency(lengths, batch_size):
+def padding_efficiency(lengths: list[int], batch_size: int) -> float:
     real = total = 0
     for i in range(0, len(lengths), batch_size):
         batch = lengths[i : i + batch_size]
@@ -155,7 +155,9 @@ def padding_efficiency(lengths, batch_size):
     return real / total
 
 
-def split_by_group(records, group_key, val_fraction):
+def split_by_group(
+    records: list[dict], group_key: str, val_fraction: float,
+) -> tuple[list[dict], list[dict]]:
     train, val = [], []
     for r in records:
         # A stable hash of the GROUP decides the side, so all records of a group stay together,
@@ -165,7 +167,7 @@ def split_by_group(records, group_key, val_fraction):
     return train, val
 
 
-def resize_embeddings(embeddings, n_new):
+def resize_embeddings(embeddings: np.ndarray, n_new: int) -> np.ndarray:
     # New token rows start at the mean embedding: a neutral start (random rows can produce
     # extreme logits). They still need training.
     mean = embeddings.mean(axis=0, keepdims=True)

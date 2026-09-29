@@ -11,12 +11,12 @@ from collections import Counter, defaultdict
 import numpy as np
 
 
-def perplexity(token_logprobs):
+def perplexity(token_logprobs: list[float]) -> float:
     # exp(average surprise): 4.0 means "as unsure as a fair pick among 4 tokens"; 1.0 is perfect.
     return math.exp(-sum(token_logprobs) / len(token_logprobs))
 
 
-def normalize_answer(s):
+def normalize_answer(s: str) -> str:
     # SQuAD rules: case, punctuation, articles and spacing shouldn't decide correctness.
     s = s.lower()
     s = "".join(ch for ch in s if ch not in set(string.punctuation))
@@ -24,11 +24,11 @@ def normalize_answer(s):
     return " ".join(s.split())
 
 
-def exact_match(prediction, reference):
+def exact_match(prediction: str, reference: str) -> float:
     return float(normalize_answer(prediction) == normalize_answer(reference))
 
 
-def token_f1(prediction, reference):
+def token_f1(prediction: str, reference: str) -> float:
     p, r = normalize_answer(prediction).split(), normalize_answer(reference).split()
     if not p or not r:
         return float(p == r)  # both empty → 1, one empty → 0
@@ -39,11 +39,11 @@ def token_f1(prediction, reference):
     return 2 * precision * recall / (precision + recall)
 
 
-def _ngrams(tokens, n):
+def _ngrams(tokens: list[str], n: int) -> Counter:
     return Counter(tuple(tokens[i : i + n]) for i in range(len(tokens) - n + 1))
 
 
-def bleu(candidate, reference, max_n=4):
+def bleu(candidate: str, reference: str, max_n: int = 4) -> float:
     c, r = candidate.split(), reference.split()
     log_ps = []
     for n in range(1, max_n + 1):
@@ -58,7 +58,7 @@ def bleu(candidate, reference, max_n=4):
     return bp * math.exp(sum(log_ps) / max_n)
 
 
-def _lcs(a, b):
+def _lcs(a: list[str], b: list[str]) -> int:
     # Longest common subsequence (in order, gaps allowed); DP with one rolling row.
     dp = [0] * (len(b) + 1)
     for x in a:
@@ -70,7 +70,7 @@ def _lcs(a, b):
     return dp[-1]
 
 
-def rouge_l(candidate, reference):
+def rouge_l(candidate: str, reference: str) -> float:
     c, r = candidate.split(), reference.split()
     lcs = _lcs(c, r)
     if lcs == 0:
@@ -79,22 +79,22 @@ def rouge_l(candidate, reference):
     return 2 * p * rec / (p + rec)
 
 
-def precision_at_k(retrieved, relevant, k):
+def precision_at_k(retrieved: list[str], relevant: set[str], k: int) -> float:
     return sum(d in relevant for d in retrieved[:k]) / k  # of what I returned, how much is relevant
 
 
-def recall_at_k(retrieved, relevant, k):
+def recall_at_k(retrieved: list[str], relevant: set[str], k: int) -> float:
     return sum(d in relevant for d in retrieved[:k]) / len(relevant)  # of what's relevant, how much I found
 
 
-def mrr(retrieved_lists, relevant_sets):
+def mrr(retrieved_lists: list[list[str]], relevant_sets: list[set[str]]) -> float:
     total = 0.0
     for retrieved, relevant in zip(retrieved_lists, relevant_sets):
         total += next((1 / i for i, d in enumerate(retrieved, 1) if d in relevant), 0.0)  # 1/rank of first hit
     return total / len(retrieved_lists)
 
 
-def ndcg_at_k(retrieved, relevance, k):
+def ndcg_at_k(retrieved: list[str], relevance: dict[str, float], k: int) -> float:
     # Each hit is worth relevance / log2(rank + 1), so lower ranks count less.
     dcg = sum(relevance.get(d, 0) / math.log2(i + 1) for i, d in enumerate(retrieved[:k], 1))
     ideal = sorted(relevance.values(), reverse=True)[:k]  # the best possible ordering
@@ -102,14 +102,16 @@ def ndcg_at_k(retrieved, relevance, k):
     return dcg / idcg if idcg > 0 else 0.0
 
 
-def pass_at_k(n, c, k):
+def pass_at_k(n: int, c: int, k: int) -> float:
     if n - c < k:
         return 1.0  # any k picks must include a passing sample
     # 1 − P(all k picks, without replacement, are failures): unbiased for the n samples we have.
     return 1.0 - math.comb(n - c, k) / math.comb(n, k)
 
 
-def paired_bootstrap(scores_a, scores_b, n_resamples=2000, seed=0):
+def paired_bootstrap(
+    scores_a: list[float], scores_b: list[float], n_resamples: int = 2000, seed: int = 0,
+) -> tuple[float, float, float]:
     # PAIRED: both systems on the same examples, so resample example indices once for both.
     diff = np.asarray(scores_b, float) - np.asarray(scores_a, float)
     rng = np.random.default_rng(seed)
@@ -118,7 +120,7 @@ def paired_bootstrap(scores_a, scores_b, n_resamples=2000, seed=0):
     return float(diff.mean()), float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))
 
 
-def cohens_kappa(rater_a, rater_b):
+def cohens_kappa(rater_a: list, rater_b: list) -> float:
     n = len(rater_a)
     p_o = sum(a == b for a, b in zip(rater_a, rater_b)) / n  # observed agreement
     ca, cb = Counter(rater_a), Counter(rater_b)
@@ -126,7 +128,7 @@ def cohens_kappa(rater_a, rater_b):
     return 1.0 if p_e == 1 else (p_o - p_e) / (1 - p_e)
 
 
-def macro_f1(y_true, y_pred):
+def macro_f1(y_true: list, y_pred: list) -> float:
     f1s = []
     for c in sorted(set(y_true) | set(y_pred), key=str):
         tp = sum(t == c and p == c for t, p in zip(y_true, y_pred))
@@ -137,7 +139,7 @@ def macro_f1(y_true, y_pred):
     return sum(f1s) / len(f1s)
 
 
-def slice_accuracy(records, key):
+def slice_accuracy(records: list[dict], key: str) -> list[tuple[str, float, int]]:
     groups = defaultdict(list)
     for r in records:
         groups[r[key]].append(bool(r["correct"]))

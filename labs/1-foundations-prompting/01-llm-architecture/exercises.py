@@ -25,7 +25,9 @@ def causal_mask(n: int) -> np.ndarray:
 
 
 # 3 ─────────────────────────────────────────────────────────────────────────────
-def scaled_dot_product_attention(q, k, v, mask=None):
+def scaled_dot_product_attention(
+    q: np.ndarray, k: np.ndarray, v: np.ndarray, mask: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Attention(Q, K, V) = softmax(Q Kᵀ / sqrt(d_k)) V
 
     q: (..., n_q, d_k)   k: (..., n_k, d_k)   v: (..., n_k, d_v)
@@ -36,7 +38,10 @@ def scaled_dot_product_attention(q, k, v, mask=None):
 
 
 # 4 ─────────────────────────────────────────────────────────────────────────────
-def multi_head_attention(x, w_q, w_k, w_v, w_o, n_heads: int, causal: bool = True):
+def multi_head_attention(
+    x: np.ndarray, w_q: np.ndarray, w_k: np.ndarray, w_v: np.ndarray, w_o: np.ndarray, n_heads: int,
+    causal: bool = True,
+) -> np.ndarray:
     """Self-attention with `n_heads` heads.
 
     x: (seq, d_model). Each weight is (d_model, d_model); project with x @ w.
@@ -65,12 +70,12 @@ def apply_rope(x: np.ndarray, positions: np.ndarray, base: float = 10000.0) -> n
 
 
 # 7 ─────────────────────────────────────────────────────────────────────────────
-def layer_norm(x, gamma, beta, eps: float = 1e-5):
+def layer_norm(x: np.ndarray, gamma: np.ndarray, beta: np.ndarray, eps: float = 1e-5) -> np.ndarray:
     """Normalise over the last axis: (x - mean) / sqrt(var + eps) * gamma + beta."""
     raise NotImplementedError
 
 
-def rms_norm(x, gamma, eps: float = 1e-6):
+def rms_norm(x: np.ndarray, gamma: np.ndarray, eps: float = 1e-6) -> np.ndarray:
     """x / sqrt(mean(x²) + eps) * gamma. No mean subtraction, no bias (Llama-style)."""
     raise NotImplementedError
 
@@ -89,7 +94,10 @@ def gpt2_param_count(vocab: int, n_ctx: int, d_model: int, n_layers: int) -> int
 
 
 # 9 ─────────────────────────────────────────────────────────────────────────────
-def kv_cache_bytes(n_layers, n_kv_heads, head_dim, seq_len, batch, bytes_per_elem=2) -> int:
+def kv_cache_bytes(
+    n_layers: int, n_kv_heads: int, head_dim: int, seq_len: int, batch: int,
+    bytes_per_elem: int = 2,
+) -> int:
     """Bytes needed to cache K and V for every layer, token and sequence in the batch."""
     raise NotImplementedError
 

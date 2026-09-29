@@ -5,10 +5,11 @@ Every function is explained step by step, with worked numeric examples, in SOLUT
 
 import math
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 
-def _tensors(block, tensors):
+def _tensors(block: str, tensors: list[tuple[str, str, list[int]]]) -> str:
     # One line per tensor: name, type, and the per-request shape (Triton adds the batch dim).
     items = ",\n".join(
         f'  {{ name: "{n}" data_type: {t} dims: [ {", ".join(map(str, d))} ] }}' for n, t, d in tensors
@@ -16,8 +17,11 @@ def _tensors(block, tensors):
     return f"{block} [\n{items}\n]"
 
 
-def triton_config(name, backend, max_batch_size, inputs, outputs, preferred_batch_sizes=None,
-                  max_queue_delay_us=None, instance_count=1, kind="KIND_GPU"):
+def triton_config(
+    name: str, backend: str, max_batch_size: int, inputs: list[tuple[str, str, list[int]]],
+    outputs: list[tuple[str, str, list[int]]], preferred_batch_sizes: list[int] | None = None,
+    max_queue_delay_us: int | None = None, instance_count: int = 1, kind: str = "KIND_GPU",
+) -> str:
     parts = [
         f'name: "{name}"',  # must equal the model's directory name
         f'backend: "{backend}"',
@@ -36,7 +40,7 @@ def triton_config(name, backend, max_batch_size, inputs, outputs, preferred_batc
     return "\n".join(parts) + "\n"
 
 
-def validate_model_repository(repo):
+def validate_model_repository(repo: str | Path) -> list[str]:
     problems = []
     for model in sorted(p for p in Path(repo).iterdir() if p.is_dir()):
         config = model / "config.pbtxt"
@@ -55,7 +59,10 @@ def validate_model_repository(repo):
     return problems
 
 
-def simulate_dynamic_batching(arrivals_ms, max_batch, max_delay_ms, compute_ms):
+def simulate_dynamic_batching(
+    arrivals_ms: list[float], max_batch: int, max_delay_ms: float,
+    compute_ms: Callable[[int], float],
+) -> list[float]:
     n = len(arrivals_ms)
     latencies = [0.0] * n
     i, free = 0, 0.0  # i = oldest unserved request; free = when the GPU becomes idle
@@ -74,7 +81,7 @@ def simulate_dynamic_batching(arrivals_ms, max_batch, max_delay_ms, compute_ms):
     return latencies
 
 
-def k8s_deployment(name, image, gpus=1, replicas=1):
+def k8s_deployment(name: str, image: str, gpus: int = 1, replicas: int = 1) -> dict:
     labels = {"app": name}  # selector and pod labels must match, or the Deployment finds no pods
     return {
         "apiVersion": "apps/v1",
@@ -108,7 +115,9 @@ def k8s_deployment(name, image, gpus=1, replicas=1):
     }
 
 
-def k8s_hpa(name, metric, target_average, min_replicas=1, max_replicas=8):
+def k8s_hpa(
+    name: str, metric: str, target_average: float, min_replicas: int = 1, max_replicas: int = 8,
+) -> dict:
     return {
         "apiVersion": "autoscaling/v2",
         "kind": "HorizontalPodAutoscaler",
@@ -127,13 +136,18 @@ def k8s_hpa(name, metric, target_average, min_replicas=1, max_replicas=8):
     }
 
 
-def replicas_needed(requests_per_sec, latency_sec, concurrency_per_replica, headroom=0.0):
+def replicas_needed(
+    requests_per_sec: float, latency_sec: float, concurrency_per_replica: int,
+    headroom: float = 0.0,
+) -> int:
     in_flight = requests_per_sec * latency_sec * (1 + headroom)  # Little's law: L = λ · W
     # Round UP (fewer replicas would overload); -1e-9 keeps float noise from turning 4.0 into 5.
     return max(1, math.ceil(in_flight / concurrency_per_replica - 1e-9))
 
 
-def kserve_infer_request(texts, input_name="TEXT", output_names=("LABEL", "SCORE")):
+def kserve_infer_request(
+    texts: list[str], input_name: str = "TEXT", output_names: tuple[str, ...] = ("LABEL", "SCORE"),
+) -> dict:
     return {
         # shape = [batch, *config dims]; strings travel as BYTES.
         "inputs": [{"name": input_name, "shape": [len(texts), 1], "datatype": "BYTES", "data": list(texts)}],

@@ -5,6 +5,7 @@
 
 import re
 from collections import defaultdict
+from collections.abc import Callable, Sequence
 
 REQUIRED_CARD_SECTIONS = (
     "intended_use", "out_of_scope_use", "training_data", "evaluation",
@@ -83,7 +84,10 @@ class GuardrailedLLM:
 
     REFUSAL = "I can't help with that request."
 
-    def __init__(self, llm, blocked_topics: list[str] = (), toxic_terms: list[str] = ()):
+    def __init__(
+        self, llm: Callable[[str], str], blocked_topics: Sequence[str] = (),
+        toxic_terms: Sequence[str] = (),
+    ) -> None:
         raise NotImplementedError
 
     def __call__(self, user_text: str) -> tuple[str, list[str]]:

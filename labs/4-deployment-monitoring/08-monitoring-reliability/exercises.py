@@ -11,7 +11,7 @@ import numpy as np
 
 
 # 1 ─────────────────────────────────────────────────────────────────────────────
-def latency_summary(latencies_ms: list[float]) -> dict:
+def latency_summary(latencies_ms: list[float]) -> dict[str, float]:
     """Return {"p50", "p95", "p99", "mean", "max"} using the NEAREST-RANK percentile:
     the value at index ceil(p/100 · n) − 1 of the sorted list.
     """
@@ -28,12 +28,12 @@ def parse_prometheus(text: str) -> dict[tuple[str, frozenset], float]:
     raise NotImplementedError
 
 
-def triton_avg_queue_ms(metrics: dict, model: str) -> float:
+def triton_avg_queue_ms(metrics: dict[tuple[str, frozenset], float], model: str) -> float:
     """nv_inference_queue_duration_us / nv_inference_request_success for that model, in ms."""
     raise NotImplementedError
 
 
-def triton_avg_batch_size(metrics: dict, model: str) -> float:
+def triton_avg_batch_size(metrics: dict[tuple[str, frozenset], float], model: str) -> float:
     """nv_inference_count / nv_inference_exec_count for that model."""
     raise NotImplementedError
 
@@ -66,7 +66,10 @@ def burn_rate(errors: int, total: int, slo: float) -> float:
     raise NotImplementedError
 
 
-def should_page(short_window: tuple[int, int], long_window: tuple[int, int], slo: float, threshold: float = 14.4) -> bool:
+def should_page(
+    short_window: tuple[int, int], long_window: tuple[int, int], slo: float,
+    threshold: float = 14.4,
+) -> bool:
     """Multi-window alert: page only if BOTH windows' burn rates exceed threshold.
     Each window is (errors, total).
     """
@@ -74,8 +77,10 @@ def should_page(short_window: tuple[int, int], long_window: tuple[int, int], slo
 
 
 # 6 ─────────────────────────────────────────────────────────────────────────────
-def retraining_decision(psi_value: float, accuracy: float, baseline_accuracy: float,
-                        new_labeled: int, max_drop: float = 0.03, min_new_labeled: int = 5000) -> tuple[bool, list[str]]:
+def retraining_decision(
+    psi_value: float, accuracy: float, baseline_accuracy: float, new_labeled: int,
+    max_drop: float = 0.03, min_new_labeled: int = 5000,
+) -> tuple[bool, list[str]]:
     """Return (retrain?, reasons). Reasons, in this order:
       "drift"        if psi_value > 0.25
       "quality_drop" if baseline_accuracy − accuracy > max_drop
@@ -99,7 +104,7 @@ class ModelRegistry:
     stage(version)              → stage string
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         raise NotImplementedError
 
     def register(self, version: str, metrics: dict) -> None:
@@ -124,7 +129,10 @@ def canary_route(request_key: str, canary_percent: float) -> str:
     raise NotImplementedError
 
 
-def canary_verdict(stable: dict, canary: dict, max_p95_regression: float = 0.10, max_error_increase: float = 0.005) -> str:
+def canary_verdict(
+    stable: dict[str, float], canary: dict[str, float], max_p95_regression: float = 0.10,
+    max_error_increase: float = 0.005,
+) -> str:
     """Compare metrics dicts {"p95_ms", "error_rate"} from the SAME time window.
     "rollback" if canary p95 > stable p95 · (1 + max_p95_regression)
                or canary error_rate − stable error_rate > max_error_increase

@@ -9,7 +9,9 @@ import torch.nn.functional as F
 
 
 # 1 ─────────────────────────────────────────────────────────────────────────────
-def training_memory_bytes(n_params: int, trainable_params: int | None = None, weight_bytes: float = 2) -> float:
+def training_memory_bytes(
+    n_params: float, trainable_params: float | None = None, weight_bytes: float = 2,
+) -> float:
     """Memory for weights + gradients + Adam states, excluding activations.
 
     - All n_params are stored with `weight_bytes` each (2 = bf16, 0.5 = 4-bit QLoRA).
@@ -21,7 +23,9 @@ def training_memory_bytes(n_params: int, trainable_params: int | None = None, we
 
 
 # 2 ─────────────────────────────────────────────────────────────────────────────
-def max_batch_size(gpu_bytes: float, weight_bytes: float, kv_bytes_per_seq: float, reserve_fraction: float = 0.1) -> int:
+def max_batch_size(
+    gpu_bytes: float, weight_bytes: float, kv_bytes_per_seq: float, reserve_fraction: float = 0.1,
+) -> int:
     """How many concurrent sequences fit? Keep reserve_fraction of GPU memory free for
     activations/workspace, subtract weights, divide the rest by KV bytes per sequence (floor, ≥0).
     """
@@ -53,7 +57,7 @@ class DynamicLossScaler:
       `growth_interval` consecutive good steps → scale *= 2 and reset the counter. Return True.
     """
 
-    def __init__(self, init_scale: float = 2.0**16, growth_interval: int = 2000):
+    def __init__(self, init_scale: float = 2.0**16, growth_interval: int = 2000) -> None:
         raise NotImplementedError
 
     def update(self, found_inf: bool) -> bool:
@@ -61,7 +65,9 @@ class DynamicLossScaler:
 
 
 # 5 ─────────────────────────────────────────────────────────────────────────────
-def accumulated_gradients(model: torch.nn.Module, x: torch.Tensor, y: torch.Tensor, micro_batch: int) -> list[torch.Tensor]:
+def accumulated_gradients(
+    model: torch.nn.Module, x: torch.Tensor, y: torch.Tensor, micro_batch: int,
+) -> list[torch.Tensor]:
     """Split (x, y) into micro-batches, run forward/backward on each with MSE loss divided by
     the number of micro-batches, WITHOUT zeroing between them. Return copies of p.grad for
     every parameter. Must equal the gradient of the MSE loss on the full batch.
@@ -71,7 +77,10 @@ def accumulated_gradients(model: torch.nn.Module, x: torch.Tensor, y: torch.Tens
 
 
 # 6 ─────────────────────────────────────────────────────────────────────────────
-def distillation_loss(student_logits, teacher_logits, labels, temperature: float = 2.0, alpha: float = 0.5):
+def distillation_loss(
+    student_logits: torch.Tensor, teacher_logits: torch.Tensor, labels: torch.Tensor,
+    temperature: float = 2.0, alpha: float = 0.5,
+) -> torch.Tensor:
     """α · T² · KL(p_teacher^T ‖ p_student^T) + (1 − α) · CE(student_logits, labels)
 
     Use F.kl_div(log_softmax(s/T), softmax(t/T), reduction="batchmean").
@@ -113,7 +122,9 @@ def speculative_expected_tokens(acceptance_rate: float, draft_len: int) -> float
 
 
 # 10 ────────────────────────────────────────────────────────────────────────────
-def decode_tokens_per_sec_bound(n_params: float, bytes_per_param: float, mem_bandwidth: float, batch: int = 1) -> float:
+def decode_tokens_per_sec_bound(
+    n_params: float, bytes_per_param: float, mem_bandwidth: float, batch: int = 1,
+) -> float:
     """Memory-bound upper limit on generated tokens/s across the batch: each decode step must
     read all weights once (ignore KV cache), and one step yields `batch` tokens.
     """

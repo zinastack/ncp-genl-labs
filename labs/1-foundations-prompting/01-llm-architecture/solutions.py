@@ -6,7 +6,7 @@ Every function is explained step by step, with worked numeric examples, in SOLUT
 import numpy as np
 
 
-def softmax(x, axis=-1):
+def softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:
     # softmax(x) == softmax(x - c) for any constant c (exp(c) cancels top and bottom).
     # Subtracting the row max makes the largest exponent exp(0) = 1, so exp() can't overflow.
     x_max = np.max(x, axis=axis, keepdims=True)  # keepdims → shape (..., 1) broadcasts per row
@@ -18,12 +18,14 @@ def softmax(x, axis=-1):
     return e / np.where(total == 0, 1.0, total)
 
 
-def causal_mask(n):
+def causal_mask(n: int) -> np.ndarray:
     # Lower triangle incl. diagonal: query i may see keys 0..i, never the future.
     return np.tril(np.ones((n, n), dtype=bool))
 
 
-def scaled_dot_product_attention(q, k, v, mask=None):
+def scaled_dot_product_attention(
+    q: np.ndarray, k: np.ndarray, v: np.ndarray, mask: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     d_k = q.shape[-1]
     # 1. Scores: how well each query matches each key. swapaxes transposes only the last two
     #    axes, so leading batch/head dimensions pass through unchanged.
@@ -37,7 +39,10 @@ def scaled_dot_product_attention(q, k, v, mask=None):
     return weights @ v, weights
 
 
-def multi_head_attention(x, w_q, w_k, w_v, w_o, n_heads, causal=True):
+def multi_head_attention(
+    x: np.ndarray, w_q: np.ndarray, w_k: np.ndarray, w_v: np.ndarray, w_o: np.ndarray, n_heads: int,
+    causal: bool = True,
+) -> np.ndarray:
     seq, d_model = x.shape
     head_dim = d_model // n_heads  # the width is split across heads, not multiplied
 
@@ -51,7 +56,7 @@ def multi_head_attention(x, w_q, w_k, w_v, w_o, n_heads, causal=True):
     return merged @ w_o  # output projection mixes information across heads
 
 
-def sinusoidal_positions(seq_len, d_model):
+def sinusoidal_positions(seq_len: int, d_model: int) -> np.ndarray:
     pos = np.arange(seq_len)[:, None]  # (seq, 1)
     i = np.arange(0, d_model, 2)[None, :]  # even dims 2i → (1, d/2)
     angles = pos / np.power(10000.0, i / d_model)  # (seq, d/2): fast waves in low dims, slow in high
@@ -61,7 +66,7 @@ def sinusoidal_positions(seq_len, d_model):
     return pe
 
 
-def apply_rope(x, positions, base=10000.0):
+def apply_rope(x: np.ndarray, positions: np.ndarray, base: float = 10000.0) -> np.ndarray:
     d = x.shape[-1]
     inv_freq = base ** (-np.arange(0, d, 2) / d)  # one rotation speed per feature pair
     theta = positions[:, None] * inv_freq[None, :]  # angle table: (seq, d/2)
@@ -75,19 +80,19 @@ def apply_rope(x, positions, base=10000.0):
     return out
 
 
-def layer_norm(x, gamma, beta, eps=1e-5):
+def layer_norm(x: np.ndarray, gamma: np.ndarray, beta: np.ndarray, eps: float = 1e-5) -> np.ndarray:
     # Per token (last axis): centre to mean 0, scale to variance 1, then learned scale/shift.
     mean = x.mean(axis=-1, keepdims=True)
     var = x.var(axis=-1, keepdims=True)
     return (x - mean) / np.sqrt(var + eps) * gamma + beta
 
 
-def rms_norm(x, gamma, eps=1e-6):
+def rms_norm(x: np.ndarray, gamma: np.ndarray, eps: float = 1e-6) -> np.ndarray:
     # Like LayerNorm without centring or bias: divide by the root-mean-square (Llama).
     return x / np.sqrt(np.mean(x**2, axis=-1, keepdims=True) + eps) * gamma
 
 
-def gpt2_param_count(vocab, n_ctx, d_model, n_layers):
+def gpt2_param_count(vocab: int, n_ctx: int, d_model: int, n_layers: int) -> int:
     d = d_model
     embeddings = vocab * d + n_ctx * d  # token + learned position embeddings
     per_layer = (
@@ -101,12 +106,15 @@ def gpt2_param_count(vocab, n_ctx, d_model, n_layers):
     return embeddings + n_layers * per_layer + final_ln  # LM head is tied: adds nothing
 
 
-def kv_cache_bytes(n_layers, n_kv_heads, head_dim, seq_len, batch, bytes_per_elem=2):
+def kv_cache_bytes(
+    n_layers: int, n_kv_heads: int, head_dim: int, seq_len: int, batch: int,
+    bytes_per_elem: int = 2,
+) -> int:
     # 2 = one K and one V tensor per layer. GQA shrinks this by using fewer KV heads.
     return 2 * n_layers * n_kv_heads * head_dim * seq_len * batch * bytes_per_elem
 
 
-def masked_mean_pool(hidden, attention_mask):
+def masked_mean_pool(hidden: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
     m = attention_mask[..., None].astype(hidden.dtype)  # (batch, seq, 1) broadcasts over features
     # Zero out padding, sum the real tokens, divide by how many real tokens there are.
     return (hidden * m).sum(axis=1) / np.clip(m.sum(axis=1), 1e-9, None)

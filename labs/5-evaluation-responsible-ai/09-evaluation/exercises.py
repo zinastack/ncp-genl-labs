@@ -85,8 +85,9 @@ def pass_at_k(n: int, c: int, k: int) -> float:
 
 
 # 7 ─────────────────────────────────────────────────────────────────────────────
-def paired_bootstrap(scores_a: list[float], scores_b: list[float], n_resamples: int = 2000,
-                     seed: int = 0) -> tuple[float, float, float]:
+def paired_bootstrap(
+    scores_a: list[float], scores_b: list[float], n_resamples: int = 2000, seed: int = 0,
+) -> tuple[float, float, float]:
     """Per-example scores of two systems on the SAME examples. Resample example indices with
     replacement (rng = np.random.default_rng(seed); rng.integers(0, n, size=(n_resamples, n))),
     compute mean(b − a) for each resample. Return (observed mean diff, 2.5th pct, 97.5th pct).

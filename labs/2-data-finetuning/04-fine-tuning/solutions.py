@@ -13,7 +13,9 @@ IGNORE_INDEX = -100  # PyTorch cross_entropy's default ignore_index
 
 
 class LoRALinear(nn.Module):
-    def __init__(self, base, r=8, alpha=16, dropout=0.0):
+    def __init__(
+        self, base: nn.Linear, r: int = 8, alpha: float = 16, dropout: float = 0.0,
+    ) -> None:
         super().__init__()
         self.base = base
         for p in self.base.parameters():
@@ -26,12 +28,12 @@ class LoRALinear(nn.Module):
         nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))  # same init nn.Linear uses
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x @ Aᵀ @ Bᵀ = (B·A)·x without ever building the full d_out × d_in matrix.
         return self.base(x) + (self.dropout(x) @ self.lora_A.T @ self.lora_B.T) * self.scaling
 
     @torch.no_grad()
-    def merge(self):
+    def merge(self) -> nn.Linear:
         # Fold the update into one dense layer: W' = W + (α/r)·B·A → no extra inference cost.
         merged = nn.Linear(self.base.in_features, self.base.out_features, bias=self.base.bias is not None)
         merged.weight.copy_(self.base.weight + self.scaling * self.lora_B @ self.lora_A)
@@ -40,7 +42,9 @@ class LoRALinear(nn.Module):
         return merged
 
 
-def apply_lora(model, target_modules, r=8, alpha=16):
+def apply_lora(
+    model: nn.Module, target_modules: list[str], r: int = 8, alpha: float = 16,
+) -> nn.Module:
     # list(...) snapshots the tree before we modify it.
     for _, parent in list(model.named_modules()):
         for name, child in list(parent.named_children()):
@@ -51,12 +55,14 @@ def apply_lora(model, target_modules, r=8, alpha=16):
     return model
 
 
-def count_parameters(model):
+def count_parameters(model: nn.Module) -> tuple[int, int]:
     params = list(model.parameters())
     return sum(p.numel() for p in params if p.requires_grad), sum(p.numel() for p in params)
 
 
-def build_sft_example(prompt_ids, response_ids, eos_id):
+def build_sft_example(
+    prompt_ids: list[int], response_ids: list[int], eos_id: int,
+) -> tuple[list[int], list[int]]:
     input_ids = list(prompt_ids) + list(response_ids) + [eos_id]
     # Loss only on the response (+ EOS, so the model learns to stop). Prompt positions are
     # ignored, otherwise the model also learns to write user prompts.
@@ -64,14 +70,14 @@ def build_sft_example(prompt_ids, response_ids, eos_id):
     return input_ids, labels
 
 
-def causal_lm_loss(logits, labels):
+def causal_lm_loss(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     # Position t predicts token t+1: drop the last prediction and the first label.
     shift_logits = logits[:, :-1].reshape(-1, logits.size(-1))
     shift_labels = labels[:, 1:].reshape(-1)
     return F.cross_entropy(shift_logits, shift_labels, ignore_index=IGNORE_INDEX)  # mean over kept tokens
 
 
-def sequence_logprob(logits, labels):
+def sequence_logprob(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     logp = logits[:, :-1].log_softmax(-1)  # same shift as the loss
     targets = labels[:, 1:]
     mask = targets != IGNORE_INDEX
@@ -81,7 +87,10 @@ def sequence_logprob(logits, labels):
     return (token_logp * mask).sum(-1)  # sum of logs = log of the whole sequence's probability
 
 
-def dpo_loss(policy_chosen, policy_rejected, ref_chosen, ref_rejected, beta=0.1):
+def dpo_loss(
+    policy_chosen: torch.Tensor, policy_rejected: torch.Tensor, ref_chosen: torch.Tensor,
+    ref_rejected: torch.Tensor, beta: float = 0.1,
+) -> torch.Tensor:
     # How much more the policy (vs the frozen reference) prefers chosen over rejected.
     margin = (policy_chosen - ref_chosen) - (policy_rejected - ref_rejected)
     # -log σ(β·margin): ln 2 at the start (margin 0), → 0 as the chosen answer wins.
@@ -89,7 +98,9 @@ def dpo_loss(policy_chosen, policy_rejected, ref_chosen, ref_rejected, beta=0.1)
     return -F.logsigmoid(beta * margin).mean()
 
 
-def train(model, x, y, steps=200, lr=1e-2):
+def train(
+    model: nn.Module, x: torch.Tensor, y: torch.Tensor, steps: int = 200, lr: float = 1e-2,
+) -> list[float]:
     # Only trainable params go to the optimizer: Adam's extra state (m, v) exists only for them.
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=lr)
     losses = []

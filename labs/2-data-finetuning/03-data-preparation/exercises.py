@@ -115,7 +115,9 @@ def padding_efficiency(lengths: list[int], batch_size: int) -> float:
 
 
 # 8 ─────────────────────────────────────────────────────────────────────────────
-def split_by_group(records: list[dict], group_key: str, val_fraction: float) -> tuple[list, list]:
+def split_by_group(
+    records: list[dict], group_key: str, val_fraction: float,
+) -> tuple[list[dict], list[dict]]:
     """Deterministic split with no group in both sets. A record goes to validation when
     hash64(str(record[group_key])) % 10_000 < val_fraction * 10_000. Return (train, val).
     """

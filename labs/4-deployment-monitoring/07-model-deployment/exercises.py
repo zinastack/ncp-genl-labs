@@ -4,13 +4,16 @@
 """
 
 import math
+from collections.abc import Callable
 from pathlib import Path
 
 
 # 1 ─────────────────────────────────────────────────────────────────────────────
-def triton_config(name: str, backend: str, max_batch_size: int, inputs: list[tuple[str, str, list[int]]],
-                  outputs: list[tuple[str, str, list[int]]], preferred_batch_sizes: list[int] | None = None,
-                  max_queue_delay_us: int | None = None, instance_count: int = 1, kind: str = "KIND_GPU") -> str:
+def triton_config(
+    name: str, backend: str, max_batch_size: int, inputs: list[tuple[str, str, list[int]]],
+    outputs: list[tuple[str, str, list[int]]], preferred_batch_sizes: list[int] | None = None,
+    max_queue_delay_us: int | None = None, instance_count: int = 1, kind: str = "KIND_GPU",
+) -> str:
     """Return config.pbtxt text. Tensors are (name, data_type, dims), e.g. ("TEXT", "TYPE_STRING", [1]).
 
     Required lines/blocks (whitespace is up to you, tests use regexes):
@@ -27,7 +30,7 @@ def triton_config(name: str, backend: str, max_batch_size: int, inputs: list[tup
 
 
 # 2 ─────────────────────────────────────────────────────────────────────────────
-def validate_model_repository(repo: Path) -> list[str]:
+def validate_model_repository(repo: str | Path) -> list[str]:
     """Return a list of problems (empty = valid). For every model directory in `repo`:
       - "<model>: missing config.pbtxt"
       - "<model>: no version directory"         (no sub-directory whose name is all digits)
@@ -39,7 +42,10 @@ def validate_model_repository(repo: Path) -> list[str]:
 
 
 # 3 ─────────────────────────────────────────────────────────────────────────────
-def simulate_dynamic_batching(arrivals_ms: list[float], max_batch: int, max_delay_ms: float, compute_ms) -> list[float]:
+def simulate_dynamic_batching(
+    arrivals_ms: list[float], max_batch: int, max_delay_ms: float,
+    compute_ms: Callable[[int], float],
+) -> list[float]:
     """Single model instance with a dynamic batcher. Return each request's latency (finish − arrival).
 
     Loop until all requests are served (arrivals are sorted):
@@ -66,7 +72,9 @@ def k8s_deployment(name: str, image: str, gpus: int = 1, replicas: int = 1) -> d
     raise NotImplementedError
 
 
-def k8s_hpa(name: str, metric: str, target_average: float, min_replicas: int = 1, max_replicas: int = 8) -> dict:
+def k8s_hpa(
+    name: str, metric: str, target_average: float, min_replicas: int = 1, max_replicas: int = 8,
+) -> dict:
     """autoscaling/v2 HorizontalPodAutoscaler scaling Deployment `name` on a Pods custom metric:
     spec.metrics = [{"type": "Pods", "pods": {"metric": {"name": metric},
                      "target": {"type": "AverageValue", "averageValue": str(target_average)}}}]
@@ -75,7 +83,10 @@ def k8s_hpa(name: str, metric: str, target_average: float, min_replicas: int = 1
 
 
 # 5 ─────────────────────────────────────────────────────────────────────────────
-def replicas_needed(requests_per_sec: float, latency_sec: float, concurrency_per_replica: int, headroom: float = 0.0) -> int:
+def replicas_needed(
+    requests_per_sec: float, latency_sec: float, concurrency_per_replica: int,
+    headroom: float = 0.0,
+) -> int:
     """Little's law: in-flight = RPS × latency. Add `headroom` (e.g. 0.2 = 20% spare), then
     divide by per-replica concurrency and round UP. Minimum 1.
     """
@@ -83,7 +94,9 @@ def replicas_needed(requests_per_sec: float, latency_sec: float, concurrency_per
 
 
 # 6 ─────────────────────────────────────────────────────────────────────────────
-def kserve_infer_request(texts: list[str], input_name: str = "TEXT", output_names: tuple[str, ...] = ("LABEL", "SCORE")) -> dict:
+def kserve_infer_request(
+    texts: list[str], input_name: str = "TEXT", output_names: tuple[str, ...] = ("LABEL", "SCORE"),
+) -> dict:
     """JSON body for POST /v2/models/<model>/infer (KServe v2 protocol):
         {"inputs": [{"name": input_name, "shape": [len(texts), 1], "datatype": "BYTES", "data": texts}],
          "outputs": [{"name": n} for n in output_names]}

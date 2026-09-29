@@ -11,8 +11,10 @@ import numpy as np
 
 
 # 1 ─────────────────────────────────────────────────────────────────────────────
-def build_prompt(instruction: str, examples: list[tuple[str, str]], query: str,
-                 input_label: str = "Input", output_label: str = "Output") -> str:
+def build_prompt(
+    instruction: str, examples: list[tuple[str, str]], query: str, input_label: str = "Input",
+    output_label: str = "Output",
+) -> str:
     """Assemble a zero/one/few-shot completion prompt, exactly in this layout:
 
         {instruction}
@@ -30,7 +32,7 @@ def build_prompt(instruction: str, examples: list[tuple[str, str]], query: str,
 
 
 # 2 ─────────────────────────────────────────────────────────────────────────────
-def to_chatml(messages: list[dict], add_generation_prompt: bool = True) -> str:
+def to_chatml(messages: list[dict[str, str]], add_generation_prompt: bool = True) -> str:
     """Render messages in ChatML (used by Qwen, many NIMs, OpenAI internally):
 
         <|im_start|>system\\nYou are helpful.<|im_end|>\\n
@@ -61,7 +63,9 @@ def top_p_filter(logits: np.ndarray, p: float) -> np.ndarray:
 
 
 # 4 ─────────────────────────────────────────────────────────────────────────────
-def apply_repetition_penalty(logits: np.ndarray, generated_ids: list[int], penalty: float) -> np.ndarray:
+def apply_repetition_penalty(
+    logits: np.ndarray, generated_ids: list[int], penalty: float,
+) -> np.ndarray:
     """CTRL / Hugging Face style. For every *distinct* token already generated, divide
     its logit by `penalty` if positive and multiply by `penalty` if negative. Return a copy.
     """
