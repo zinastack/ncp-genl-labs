@@ -256,3 +256,324 @@ capabilities while the model learns the domain. PEFT methods such as LoRA and lo
 rates help as well. More epochs on legal-only data makes forgetting worse. Using a tokenizer that
 differs from the base model's breaks the model.
 """
+
+[[questions]]
+id = "03-13"
+topic = "LSH"
+question = """
+In MinHash-LSH deduplication, signatures are split into b bands of r rows, and two documents
+become candidates if any band matches exactly. What happens if you keep the signature length but
+use fewer, wider bands (larger r)?
+"""
+options = [
+  "More pairs become candidates at every similarity level",
+  "Fewer dissimilar pairs become candidates (a stricter threshold), but some true near-duplicates are missed",
+  "The Jaccard estimates become exact",
+  "Deduplication becomes quadratic in corpus size",
+]
+answer = ["B"]
+explanation = """
+A band matches with probability J^r, so wider bands are much harder to match, and the candidate
+probability 1 − (1 − J^r)^b shifts toward higher similarity. For example, at J = 0.7 it drops from
+0.99 (16 bands × 4 rows) to 0.38 (8 × 8). Band shape tunes recall against false candidates. It
+doesn't make estimates exact, and LSH stays sub-quadratic either way.
+"""
+
+[[questions]]
+id = "03-14"
+topic = "Semantic deduplication"
+question = """
+After exact and MinHash deduplication, a corpus still contains many articles that say the same
+thing in different words. Which step targets this?
+"""
+options = [
+  "Semantic deduplication: embed documents, cluster them, and remove items that are too close in embedding space",
+  "A second MinHash pass with more permutations",
+  "Lowercasing the corpus",
+  "Increasing the word-count filter threshold",
+]
+answer = ["A"]
+explanation = """
+MinHash measures surface overlap of word shingles, so paraphrases share few shingles and survive.
+Embedding-based semantic dedup (NeMo Curator's SemDedup) compares meaning. More permutations only
+improve the Jaccard estimate, lowercasing doesn't create overlap, and length filters are unrelated.
+"""
+
+[[questions]]
+id = "03-15"
+topic = "Deterministic hashing"
+question = """
+A distributed dedup job hashes documents with Python's built-in hash() on 64 workers, then merges
+the results. Duplicates across workers are not detected. Why?
+"""
+options = [
+  "hash() is too slow for large documents",
+  "hash() produces only 32-bit values",
+  "Python salts string hashes randomly per process, so the same text gets different hash values on different workers; use a stable hash such as MD5 or xxHash",
+  "The documents must be tokenised before hashing",
+]
+answer = ["C"]
+explanation = """
+Hash randomisation (PYTHONHASHSEED) protects dictionaries from attacks, but it means hash() of the
+same string differs between processes and runs. Dedup needs a deterministic content hash. Speed
+and 32-bit width aren't the problem, and hashing raw normalised text works without tokenisation.
+"""
+
+[[questions]]
+id = "03-16"
+topic = "Byte-level tokenization"
+question = """
+Why does a byte-level BPE tokenizer (as used by GPT-2 and Llama-3) never produce an unknown
+(<unk>) token, even for emoji or rare scripts?
+"""
+options = [
+  "Its vocabulary contains every word in every language",
+  "Unknown characters are silently dropped before tokenisation",
+  "It maps unknown characters to the closest ASCII letter",
+  "Its base vocabulary covers all 256 byte values, so any UTF-8 text can always be split into known byte tokens, which merges then combine",
+]
+answer = ["D"]
+explanation = """
+Every string is a sequence of UTF-8 bytes, and all 256 byte values are in the base vocabulary, so
+nothing is ever out of vocabulary. Rare characters simply cost more tokens (a Hangul syllable is 3
+bytes). No vocabulary contains every word, and dropping or transliterating characters would lose information.
+"""
+
+[[questions]]
+id = "03-17"
+topic = "SentencePiece"
+question = "What distinguishes SentencePiece from tokenizers that need pre-tokenisation on spaces?"
+options = [
+  "It only supports English",
+  "It treats the input as a raw Unicode stream, encoding spaces as a visible symbol (▁), so it needs no language-specific word splitting",
+  "It uses ## to mark word continuations",
+  "It cannot be used with BPE",
+]
+answer = ["B"]
+explanation = """
+Because spaces are ordinary symbols, SentencePiece works for languages without spaces (Chinese,
+Japanese, Thai) and makes detokenisation lossless. It's language-agnostic and implements both BPE
+and Unigram. The ## continuation marker belongs to WordPiece (BERT).
+"""
+
+[[questions]]
+id = "03-18"
+topic = "Decontamination"
+question = """
+When should benchmark decontamination be applied in an LLM development pipeline, and to what
+data? (Select TWO.)
+"""
+options = [
+  "Before training, removing training documents that overlap the evaluation sets you will report on",
+  "To every dataset used for training, including fine-tuning and synthetic data",
+  "After training, by deleting the benchmark from the evaluation suite",
+  "Only to the test set, by paraphrasing its questions each time",
+  "Never, because more data always improves benchmark validity",
+]
+answer = ["A", "B"]
+explanation = """
+Contamination makes scores measure memorisation. It has to be removed from what the model learns
+from, before training, and that includes SFT and synthetic data, which can also contain benchmark
+items. Deleting benchmarks after the fact hides the problem, and paraphrasing test items is a weak
+patch. Contaminated data makes benchmarks less valid, not more.
+"""
+
+[[questions]]
+id = "03-19"
+topic = "Attention mask"
+question = "In a padded batch, what is the role of the attention mask?"
+options = [
+  "It marks which positions are real tokens (1) and which are padding (0), so attention ignores the padding",
+  "It stores the positions of masked words for masked-language modelling",
+  "It is the causal mask used by decoders",
+  "It indicates which tokens to redact as PII",
+]
+answer = ["A"]
+explanation = """
+Padding exists only to make the batch rectangular, so the model must not attend to it, or padding
+would change real outputs. The attention mask says which keys are real. MLM masking, causal masking
+and PII redaction are unrelated uses of the word "mask".
+"""
+
+[[questions]]
+id = "03-20"
+topic = "Pad token"
+question = """
+A decoder-only model has no dedicated padding token, and batching fails with "tokenizer has no
+pad_token". What is the common, safe fix?
+"""
+options = [
+  "Train a new tokenizer with a pad token",
+  "Remove all padding by using batch size 1 for training",
+  "Pad with token id 0 without an attention mask",
+  "Set tokenizer.pad_token = tokenizer.eos_token and pass the attention mask so padded positions are ignored",
+]
+answer = ["D"]
+explanation = """
+Reusing EOS as the pad token is standard for decoder models, because the attention mask (and -100
+labels for padded positions in training) make the actual pad value irrelevant. A new tokenizer
+breaks the model, batch size 1 wastes the GPU, and padding without a mask lets pad tokens affect outputs.
+"""
+
+[[questions]]
+id = "03-21"
+topic = "Packing and attention"
+question = """
+You enable sequence packing for SFT. What should you make sure of so that packing doesn't
+degrade training?
+"""
+options = [
+  "That examples are separated by EOS and cannot attend to each other (block-diagonal attention mask or position/document resets)",
+  "That every packed row contains exactly one example",
+  "That padding is added between examples",
+  "That packing is only used with batch size 1",
+]
+answer = ["A"]
+explanation = """
+Without separation, tokens of one example can attend to an unrelated previous example in the same
+row, which is noise that teaches wrong dependencies. Frameworks such as NeMo support packed sequences
+with proper masking. One example per row isn't packing, added padding defeats the purpose, and
+packing works with any batch size.
+"""
+
+[[questions]]
+id = "03-22"
+topic = "Upsampling"
+question = """
+A scarce, high-quality domain dataset is repeated 20 times (20 epochs) within a pre-training
+blend so it has more influence. What is the main risk?
+"""
+options = [
+  "The tokenizer will stop recognising the domain vocabulary",
+  "Heavy repetition leads to memorisation and overfitting to that data, with diminishing or negative returns",
+  "The model will ignore the dataset because it is small",
+  "Training becomes non-deterministic",
+]
+answer = ["B"]
+explanation = """
+Moderate upsampling of valuable data helps, but many repeats make the model memorise the exact text
+(also a privacy risk) and overfit, with gains shrinking or reversing. Keep repeats modest and prefer
+collecting or synthesising more data. The tokenizer doesn't change, the data isn't ignored, and determinism is unaffected.
+"""
+
+[[questions]]
+id = "03-23"
+topic = "Quality classifiers"
+question = """
+After heuristic filtering, a web corpus still contains fluent but low-value text (SEO spam,
+boilerplate product pages). What is the standard next filter?
+"""
+options = [
+  "A second, stricter word-count filter",
+  "Randomly dropping 50% of documents",
+  "A model-based quality classifier (for example fastText or DeBERTa trained to separate high- and low-quality text), scoring every document",
+  "Removing all documents that contain URLs",
+]
+answer = ["C"]
+explanation = """
+Fluent spam passes simple heuristics, but a classifier trained on examples of good vs bad text can
+recognise it. NeMo Curator ships quality and domain classifiers for exactly this. Stricter length
+filters don't target fluency, random dropping removes good data too, and URLs appear in plenty of valuable documents.
+"""
+
+[[questions]]
+id = "03-24"
+topic = "Synthetic data"
+question = """
+A team generates synthetic instruction data with a large LLM to fine-tune a smaller model. Which
+steps make the synthetic data trustworthy? (Select TWO.)
+"""
+options = [
+  "Score and filter generations with a reward or judge model (for example Nemotron-4-340B-Reward) and discard low-quality samples",
+  "Deduplicate and decontaminate the synthetic data like any other training data",
+  "Keep every generation, since more data is always better",
+  "Generate all samples at temperature 0 so they are identical",
+  "Skip evaluation, because synthetic data is error-free",
+]
+answer = ["A", "B"]
+explanation = """
+Generators make mistakes and repeat themselves. Filtering with a reward model or judge keeps the
+good samples, and synthetic data can still duplicate items or reproduce benchmark questions, so the
+usual dedup and decontamination steps apply. Unfiltered volume, identical temperature-0 samples and
+skipping evaluation all reduce quality.
+"""
+
+[[questions]]
+id = "03-25"
+topic = "Data quality vs quantity"
+question = """
+A team can either fine-tune on 1,000 carefully written, diverse instruction examples or on 100,000
+scraped, noisy examples. For teaching a pre-trained model a response style, which is usually better?
+"""
+options = [
+  "The 1,000 curated examples: alignment-style fine-tuning depends more on quality and diversity than volume",
+  "The 100,000 noisy examples, because more data always wins",
+  "Neither; style can only be taught by pre-training",
+  "Both are equivalent, since the model ignores noise",
+]
+answer = ["A"]
+explanation = """
+Work such as LIMA showed that a small set of high-quality examples is enough to teach format and
+style, because knowledge comes from pre-training. Noisy data teaches the noise. Style is exactly
+what SFT changes, and models do learn from noise, often badly.
+"""
+
+[[questions]]
+id = "03-26"
+topic = "Language identification"
+question = "Why is language identification typically one of the first steps of a multilingual curation pipeline?"
+options = [
+  "To remove all non-English text",
+  "To route each document to language-appropriate filters and tokenizer checks, and to control the language mix of the final blend",
+  "To translate every document into English",
+  "To detect PII",
+]
+answer = ["B"]
+explanation = """
+Heuristics (word length, stop-word ratios) and quality classifiers are language-specific, and the
+blend needs deliberate proportions per language. Knowing each document's language enables both.
+Removing or translating everything would defeat multilingual training, and PII detection is a separate step.
+"""
+
+[[questions]]
+id = "03-27"
+topic = "Vocabulary management"
+question = """
+A domain has thousands of long chemical names that the tokenizer splits into 8–12 pieces each.
+What is the most complete remedy if you control training?
+"""
+options = [
+  "Replace the chemical names with their first letter",
+  "Switch to a character-level tokenizer",
+  "Extend the vocabulary with frequent domain terms, resize the embeddings, and continue pre-training on domain text so the new tokens learn good representations",
+  "Lowercase the corpus",
+]
+answer = ["C"]
+explanation = """
+Adding tokens shortens sequences, but new embedding rows start untrained, so the model must see
+plenty of domain text to learn them: continued pre-training, or at least training the embeddings.
+Abbreviating destroys information, character-level tokenisation makes sequences even longer, and
+lowercasing doesn't address fragmentation.
+"""
+
+[[questions]]
+id = "03-28"
+topic = "SFT data format"
+question = """
+You fine-tune a chat model on JSONL records of the form {"messages": [...]}. At inference,
+quality is worse than expected even though training loss was good. Which data-preparation mismatch
+is the most likely cause?
+"""
+options = [
+  "The JSONL file used Unix line endings",
+  "The records were shuffled",
+  "The data was stored as JSONL instead of CSV",
+  "Training formatted conversations with a different chat template than the one used at inference",
+]
+answer = ["D"]
+explanation = """
+The model learns the exact token layout of its training conversations. Serving with a different
+template (other role markers, a missing generation prompt) shifts inputs away from what it learned,
+so quality drops with perfectly good weights. Use the same apply_chat_template for training and
+serving. Line endings, shuffling and JSONL itself are fine.
+"""

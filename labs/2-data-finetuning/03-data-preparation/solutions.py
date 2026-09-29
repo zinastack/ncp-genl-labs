@@ -7,6 +7,7 @@ import hashlib
 import re
 import unicodedata
 from collections import Counter
+from collections.abc import Callable
 
 import numpy as np
 
@@ -172,3 +173,70 @@ def resize_embeddings(embeddings: np.ndarray, n_new: int) -> np.ndarray:
     # extreme logits). They still need training.
     mean = embeddings.mean(axis=0, keepdims=True)
     return np.vstack([embeddings, np.repeat(mean, n_new, axis=0)])
+
+
+def lsh_candidate_pairs(signatures: list[np.ndarray], bands: int) -> set[tuple[int, int]]:
+    # Cut every signature into `bands` equal slices. Two documents become candidates if ANY
+    # slice matches exactly, so we only compare documents that share a bucket, never all pairs.
+    rows = len(signatures[0]) // bands
+    buckets: dict[tuple[int, bytes], list[int]] = {}
+    for doc, sig in enumerate(signatures):
+        for b in range(bands):
+            key = (b, sig[b * rows : (b + 1) * rows].tobytes())  # band index + band contents
+            buckets.setdefault(key, []).append(doc)
+    return {(a, c) for docs in buckets.values() for i, a in enumerate(docs) for c in docs[i + 1 :]}
+
+
+def lsh_candidate_probability(jaccard: float, bands: int, rows: int) -> float:
+    # One band matches with probability J^rows (every row must agree); a pair is a candidate
+    # unless ALL bands miss: 1 − (1 − J^r)^b. This S-curve is the dedup threshold.
+    return 1 - (1 - jaccard**rows) ** bands
+
+
+def fertility(texts: list[str], tokenize: Callable[[str], list]) -> float:
+    # Tokens per whitespace word, over the whole set: ~1.3 is typical for English with a good
+    # tokenizer; 3+ means text is fragmented (longer sequences, higher cost, less context).
+    words = sum(len(t.split()) for t in texts)
+    return sum(len(tokenize(t)) for t in texts) / words
+
+
+def utf8_byte_tokens(text: str) -> list[int]:
+    # Byte-level tokenizers start from these 256 possible values, so ANY string is representable
+    # and there is never an <unk> token. Non-Latin characters take 2–4 bytes each.
+    return list(text.encode("utf-8"))
+
+
+def contaminated_items(train_docs: list[str], test_items: list[str], n: int = 13) -> list[int]:
+    def grams(text: str) -> set[tuple[str, ...]]:
+        words = re.findall(r"\w+", text.lower())  # compare words, ignoring case and punctuation
+        return {tuple(words[i : i + n]) for i in range(len(words) - n + 1)}
+
+    seen: set[tuple[str, ...]] = set()
+    for doc in train_docs:
+        seen |= grams(doc)
+    # A test item that shares any long n-gram with the training data may have been memorised.
+    return [i for i, item in enumerate(test_items) if grams(item) & seen]
+
+
+def pad_batch(seqs: list[list[int]], pad_id: int, side: str = "right") -> tuple[np.ndarray, np.ndarray]:
+    width = max(map(len, seqs))
+    ids = np.full((len(seqs), width), pad_id)
+    mask = np.zeros((len(seqs), width), dtype=int)
+    for row, seq in enumerate(seqs):
+        # Right padding (training, encoders): tokens first. Left padding (batched generation with
+        # decoders): tokens last, so every row's final position is its real last token.
+        cols = slice(0, len(seq)) if side == "right" else slice(width - len(seq), width)
+        ids[row, cols] = seq
+        mask[row, cols] = 1
+    return ids, mask
+
+
+def blend_plan(dataset_tokens: dict[str, float], weights: dict[str, float], total_tokens: float) -> dict[str, tuple[float, float]]:
+    # For each source: how many tokens to draw (weight × budget) and how many passes (epochs)
+    # over it that means. Epochs > 1 = upsampling a scarce source; < 1 = using a slice of a big one.
+    total_weight = sum(weights.values())
+    plan = {}
+    for name, size in dataset_tokens.items():
+        take = total_tokens * weights[name] / total_weight
+        plan[name] = (take, take / size)
+    return plan

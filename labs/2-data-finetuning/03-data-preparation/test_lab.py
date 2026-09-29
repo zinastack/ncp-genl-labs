@@ -87,3 +87,53 @@ def test_9_resize_embeddings(lab):
     assert out.shape == (6, 3)
     np.testing.assert_array_equal(out[:4], e)
     np.testing.assert_allclose(out[4], e.mean(0))
+
+
+def test_10_lsh(lab):
+    docs = ["the quick brown fox jumps over the lazy dog near the river bank today",
+            "the quick brown fox jumps over the lazy dog near the river bank now",
+            "completely different text about gpus and tensor cores in data centers"]
+    sigs = [lab.minhash_signature(lab.shingles(d), 64) for d in docs]
+    assert lab.lsh_candidate_pairs(sigs, bands=16) == {(0, 1)}
+    same = np.arange(8, dtype=np.uint64)
+    assert lab.lsh_candidate_pairs([same, same.copy(), same + 100], bands=4) == {(0, 1)}
+    assert lab.lsh_candidate_probability(0.7, 16, 4) == pytest.approx(0.988, abs=1e-3)
+    assert lab.lsh_candidate_probability(0.3, 16, 4) == pytest.approx(0.122, abs=1e-3)
+    assert lab.lsh_candidate_probability(0.7, 8, 8) < lab.lsh_candidate_probability(0.7, 16, 4), \
+        "more rows per band = stricter threshold"
+
+
+def test_11_fertility_and_bytes(lab):
+    assert lab.utf8_byte_tokens("GPU") == [71, 80, 85]
+    assert len(lab.utf8_byte_tokens("중앙")) == 6, "each Hangul syllable is 3 UTF-8 bytes"
+    assert all(0 <= b < 256 for b in lab.utf8_byte_tokens("naïve 中文 🚀")), "any text fits in 256 base tokens"
+    en = ["The central bank kept interest rates unchanged"]
+    ko = ["중앙은행은 기준금리를 동결했다"]
+    assert lab.fertility(en, str.split) == 1.0
+    assert lab.fertility(en, lab.utf8_byte_tokens) == pytest.approx(46 / 7)
+    assert lab.fertility(ko, lab.utf8_byte_tokens) > 2 * lab.fertility(en, lab.utf8_byte_tokens)
+
+
+def test_12_contamination(lab):
+    train = ["Question: What is the capital of France? Answer: Paris is the capital of France."]
+    test = ["what is the capital of france answer paris", "How many legs does a spider have?"]
+    assert lab.contaminated_items(train, test, n=5) == [0], "case and punctuation don't hide a leak"
+    assert lab.contaminated_items(train, test, n=13) == [], "the test item is shorter than 13 words"
+
+
+def test_13_pad_batch(lab):
+    ids, mask = lab.pad_batch([[5, 6, 7], [8]], pad_id=0, side="right")
+    np.testing.assert_array_equal(ids, [[5, 6, 7], [8, 0, 0]])
+    np.testing.assert_array_equal(mask, [[1, 1, 1], [1, 0, 0]])
+    ids, mask = lab.pad_batch([[5, 6, 7], [8]], pad_id=0, side="left")
+    np.testing.assert_array_equal(ids, [[5, 6, 7], [0, 0, 8]])
+    np.testing.assert_array_equal(mask, [[1, 1, 1], [0, 0, 1]])
+    assert list(ids[:, -1]) == [7, 8], "left padding: the last column holds every row's real last token"
+
+
+def test_14_blend_plan(lab):
+    plan = lab.blend_plan({"web": 1e12, "legal": 2e9, "instructions": 5e8},
+                          {"web": 7, "legal": 2, "instructions": 1}, total_tokens=2e10)
+    assert plan["web"] == pytest.approx((1.4e10, 0.014))
+    assert plan["legal"] == pytest.approx((4e9, 2.0)), "legal data is seen twice (upsampled)"
+    assert plan["instructions"] == pytest.approx((2e9, 4.0))

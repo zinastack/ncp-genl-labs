@@ -99,3 +99,10 @@ Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through ever
 | 7 | `pack_sequences`, `padding_efficiency` | packing vs padding |
 | 8 | `split_by_group` | leakage-free deterministic splits |
 | 9 | `resize_embeddings` | adding tokens to a vocabulary |
+| 10 | `lsh_candidate_pairs`, `lsh_candidate_probability` | LSH banding: fuzzy dedup without comparing all pairs |
+| 11 | `fertility`, `utf8_byte_tokens` | tokenizer fit per language/domain; why byte-level BPE has no `<unk>` |
+| 12 | `contaminated_items` | benchmark decontamination with n-gram overlap |
+| 13 | `pad_batch` | left vs right padding and the attention mask |
+| 14 | `blend_plan` | data blending: mixture weights, upsampling, epochs per source |
+
+Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`](SOLUTION.md).
