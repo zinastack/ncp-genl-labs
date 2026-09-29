@@ -6,6 +6,7 @@
 import hashlib
 import math
 import re
+from collections.abc import Callable
 
 import numpy as np
 
@@ -137,5 +138,67 @@ def canary_verdict(
     "rollback" if canary p95 > stable p95 · (1 + max_p95_regression)
                or canary error_rate − stable error_rate > max_error_increase
     otherwise "promote".
+    """
+    raise NotImplementedError
+
+
+# 9 ─────────────────────────────────────────────────────────────────────────────
+def merge_histograms(per_replica_counts: list[list[int]]) -> list[int]:
+    """Add cumulative bucket counts from several replicas (same bucket bounds), bucket by bucket."""
+    raise NotImplementedError
+
+
+def histogram_quantile(bounds: list[float], cumulative_counts: list[int], q: float) -> float:
+    """Prometheus-style quantile from a cumulative histogram. bounds are bucket upper bounds
+    (the last is float("inf")); cumulative_counts[i] = observations ≤ bounds[i].
+    rank = q × total. Find the first bucket whose count ≥ rank and interpolate linearly between
+    the previous bound (0 for the first bucket) and this bound:
+        prev_bound + (bound − prev_bound) × (rank − prev_count) / (count − prev_count)
+    If that bucket is +Inf, return the previous (last finite) bound.
+    """
+    raise NotImplementedError
+
+
+# 10 ────────────────────────────────────────────────────────────────────────────
+class CircuitBreaker:
+    """States: "closed" (normal), "open" (fail fast), "half_open" (one trial allowed).
+
+    allow(now): if open and now − opened_at ≥ reset_timeout → become half_open.
+                Return True unless the state is "open".
+    record(success, now): success → closed, failures = 0.
+                failure → failures += 1; if half_open or failures ≥ failure_threshold → open
+                (opened_at = now).
+    """
+
+    def __init__(self, failure_threshold: int, reset_timeout: float) -> None:
+        raise NotImplementedError
+
+    def allow(self, now: float) -> bool:
+        raise NotImplementedError
+
+    def record(self, success: bool, now: float) -> None:
+        raise NotImplementedError
+
+
+# 11 ────────────────────────────────────────────────────────────────────────────
+def backoff_delays(attempts: int, base: float, cap: float, jitter: Callable[[float], float]) -> list[float]:
+    """Exponential backoff with full jitter: attempt i waits jitter(min(cap, base × 2^i)),
+    where jitter(upper) returns a delay between 0 and upper (random in production).
+    """
+    raise NotImplementedError
+
+
+# 12 ────────────────────────────────────────────────────────────────────────────
+def embedding_drift(reference: np.ndarray, current: np.ndarray) -> float:
+    """1 − cosine similarity between the mean embedding of `reference` (n, d) and of `current` (m, d)."""
+    raise NotImplementedError
+
+
+# 13 ────────────────────────────────────────────────────────────────────────────
+def gpu_node_action(metrics: dict[str, float], max_temp_c: float = 85.0) -> tuple[str, list[str]]:
+    """Decide what to do with a GPU node from DCGM metrics (missing keys count as 0).
+    "drain" with reasons ["xid"] and/or ["ecc_dbe"] (in that order) if DCGM_FI_DEV_XID_ERRORS > 0
+    or DCGM_FI_DEV_ECC_DBE_VOL_TOTAL > 0. Otherwise ("alert", ["temperature"]) if
+    DCGM_FI_DEV_GPU_TEMP ≥ max_temp_c. Otherwise ("ok", []).
     """
     raise NotImplementedError

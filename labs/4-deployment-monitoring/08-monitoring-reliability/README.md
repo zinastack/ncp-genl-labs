@@ -102,3 +102,10 @@ Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through ever
 | 6 | `retraining_decision` | automated retraining triggers |
 | 7 | `ModelRegistry` | versioning, promotion, rollback |
 | 8 | `canary_route`, `canary_verdict` | deterministic traffic split and promote/rollback |
+| 9 | `merge_histograms`, `histogram_quantile` | correct latency percentiles across replicas (Prometheus histograms) |
+| 10 | `CircuitBreaker` | fail fast when a dependency is down, then probe for recovery |
+| 11 | `backoff_delays` | retries with exponential backoff and jitter |
+| 12 | `embedding_drift` | drift detection for text inputs via embeddings |
+| 13 | `gpu_node_action` | acting on DCGM health signals (XID, ECC, temperature) |
+
+Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`](SOLUTION.md).

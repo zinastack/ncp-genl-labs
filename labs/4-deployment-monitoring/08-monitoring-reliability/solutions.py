@@ -6,6 +6,7 @@ Every function is explained step by step, with worked numeric examples, in SOLUT
 import hashlib
 import math
 import re
+from collections.abc import Callable
 
 import numpy as np
 
@@ -167,3 +168,72 @@ def canary_verdict(
     if canary["error_rate"] - stable["error_rate"] > max_error_increase:
         return "rollback"
     return "promote"
+
+
+def merge_histograms(per_replica_counts: list[list[int]]) -> list[int]:
+    # Cumulative bucket counts from several replicas simply ADD UP (same bucket bounds).
+    return [sum(c) for c in zip(*per_replica_counts)]
+
+
+def histogram_quantile(bounds: list[float], cumulative_counts: list[int], q: float) -> float:
+    # Prometheus-style: find the bucket holding the q-th observation, then interpolate linearly
+    # inside it (observations are assumed evenly spread within a bucket).
+    rank = q * cumulative_counts[-1]
+    prev_bound, prev_count = 0.0, 0
+    for bound, count in zip(bounds, cumulative_counts):
+        if count >= rank:
+            if math.isinf(bound):  # can't interpolate into +Inf: report the last finite bound
+                return prev_bound
+            return prev_bound + (bound - prev_bound) * (rank - prev_count) / (count - prev_count)
+        prev_bound, prev_count = bound, count
+    return prev_bound
+
+
+class CircuitBreaker:
+    def __init__(self, failure_threshold: int, reset_timeout: float) -> None:
+        self.failure_threshold = failure_threshold
+        self.reset_timeout = reset_timeout
+        self.state = "closed"  # closed = normal; open = fail fast; half_open = probing
+        self.failures = 0
+        self.opened_at = 0.0
+
+    def allow(self, now: float) -> bool:
+        if self.state == "open" and now - self.opened_at >= self.reset_timeout:
+            self.state = "half_open"  # cool-down over: let a trial request through
+        return self.state != "open"  # while open, fail fast (serve a fallback) without calling
+
+    def record(self, success: bool, now: float) -> None:
+        if success:
+            self.state, self.failures = "closed", 0
+            return
+        self.failures += 1
+        # A failed probe, or too many consecutive failures, opens the circuit.
+        if self.state == "half_open" or self.failures >= self.failure_threshold:
+            self.state, self.opened_at = "open", now
+
+
+def backoff_delays(attempts: int, base: float, cap: float, jitter: Callable[[float], float]) -> list[float]:
+    # Exponential backoff (base, 2·base, 4·base, … capped) with "full jitter": a random wait up to
+    # that bound, so thousands of clients don't retry in synchronised waves.
+    return [jitter(min(cap, base * 2**i)) for i in range(attempts)]
+
+
+def embedding_drift(reference: np.ndarray, current: np.ndarray) -> float:
+    # Text drift via embeddings: 1 − cosine similarity of the two centroids.
+    # 0 = same typical meaning; larger = users are talking about different things.
+    a, b = reference.mean(axis=0), current.mean(axis=0)
+    return float(1 - a @ b / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+
+def gpu_node_action(metrics: dict[str, float], max_temp_c: float = 85.0) -> tuple[str, list[str]]:
+    # Turn DCGM health metrics into an operational decision.
+    reasons = []
+    if metrics.get("DCGM_FI_DEV_XID_ERRORS", 0) > 0:
+        reasons.append("xid")  # driver-reported GPU faults
+    if metrics.get("DCGM_FI_DEV_ECC_DBE_VOL_TOTAL", 0) > 0:
+        reasons.append("ecc_dbe")  # uncorrectable (double-bit) memory errors: results can be corrupt
+    if reasons:
+        return "drain", reasons  # cordon + drain the node, run DCGM diagnostics
+    if metrics.get("DCGM_FI_DEV_GPU_TEMP", 0) >= max_temp_c:
+        return "alert", ["temperature"]  # thermal throttling risk: investigate cooling
+    return "ok", []

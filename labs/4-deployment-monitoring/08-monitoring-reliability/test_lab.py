@@ -91,3 +91,58 @@ def test_8_canary(lab):
     assert lab.canary_verdict(stable, {"p95_ms": 210, "error_rate": 0.003}) == "promote"
     assert lab.canary_verdict(stable, {"p95_ms": 260, "error_rate": 0.002}) == "rollback"
     assert lab.canary_verdict(stable, {"p95_ms": 190, "error_rate": 0.02}) == "rollback"
+
+
+BOUNDS = [0.05, 0.1, 0.25, 0.5, 1.0, float("inf")]  # latency buckets in seconds (Prometheus "le")
+FAST = [800, 880, 895, 900, 900, 900]   # replica A: 900 requests, mostly fast
+SLOW = [0, 10, 40, 80, 100, 100]        # replica B: 100 requests, slow
+
+
+def test_9_histograms(lab):
+    assert lab.merge_histograms([FAST, SLOW]) == [800, 890, 935, 980, 1000, 1000]
+    p95_a = lab.histogram_quantile(BOUNDS, FAST, 0.95)
+    p95_b = lab.histogram_quantile(BOUNDS, SLOW, 0.95)
+    assert p95_a == pytest.approx(0.084375) and p95_b == pytest.approx(0.875)
+    true_p95 = lab.histogram_quantile(BOUNDS, lab.merge_histograms([FAST, SLOW]), 0.95)
+    assert true_p95 == pytest.approx(1 / 3)
+    assert (p95_a + p95_b) / 2 == pytest.approx(0.4797, abs=1e-4), "averaging per-replica P95s is wrong"
+    assert lab.histogram_quantile(BOUNDS, [0, 0, 0, 0, 5, 10], 0.99) == 1.0, "+Inf bucket → last finite bound"
+
+
+def test_10_circuit_breaker(lab):
+    cb = lab.CircuitBreaker(failure_threshold=3, reset_timeout=30)
+    for t in range(3):
+        assert cb.allow(t)
+        cb.record(False, t)
+    assert cb.state == "open" and not cb.allow(10), "fail fast while open"
+    assert cb.allow(32) and cb.state == "half_open", "after the cool-down, one trial is allowed"
+    cb.record(False, 32)
+    assert cb.state == "open" and not cb.allow(40), "a failed trial re-opens immediately"
+    assert cb.allow(63)
+    cb.record(True, 63)
+    assert cb.state == "closed" and cb.failures == 0
+
+
+def test_11_backoff(lab):
+    no_jitter = lab.backoff_delays(7, base=0.1, cap=2.0, jitter=lambda upper: upper)
+    assert no_jitter == pytest.approx([0.1, 0.2, 0.4, 0.8, 1.6, 2.0, 2.0])
+    rng = np.random.default_rng(0)
+    delays = lab.backoff_delays(7, 0.1, 2.0, jitter=lambda upper: rng.uniform(0, upper))
+    assert all(0 <= d <= u for d, u in zip(delays, no_jitter)), "full jitter stays under the bound"
+
+
+def test_12_embedding_drift(lab):
+    rng = np.random.default_rng(0)
+    topic_a, topic_b = np.eye(16)[0] * 5, np.eye(16)[1] * 5
+    ref = topic_a + rng.normal(size=(500, 16))
+    same = topic_a + rng.normal(size=(500, 16))
+    shifted = topic_b + rng.normal(size=(500, 16))
+    assert lab.embedding_drift(ref, same) < 0.05
+    assert lab.embedding_drift(ref, shifted) > 0.8, "users now ask about a different topic"
+
+
+def test_13_gpu_node_action(lab):
+    assert lab.gpu_node_action({"DCGM_FI_DEV_GPU_TEMP": 62}) == ("ok", [])
+    assert lab.gpu_node_action({"DCGM_FI_DEV_GPU_TEMP": 88}) == ("alert", ["temperature"])
+    assert lab.gpu_node_action({"DCGM_FI_DEV_XID_ERRORS": 79, "DCGM_FI_DEV_ECC_DBE_VOL_TOTAL": 2,
+                                "DCGM_FI_DEV_GPU_TEMP": 90}) == ("drain", ["xid", "ecc_dbe"])

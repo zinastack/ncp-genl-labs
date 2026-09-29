@@ -208,3 +208,258 @@ synchronised retry storms. A circuit breaker stops calling a failing dependency 
 gracefully. Unlimited retries and no timeouts amplify the outage. Scaling the API tier doesn't fix
 a slow dependency and can overload it further.
 """
+
+[[questions]]
+id = "08-11"
+topic = "Aggregating percentiles"
+question = """
+Ten inference replicas each export latency as a Prometheus histogram. How should the service-wide
+P95 latency be computed?
+"""
+options = [
+  "Sum the bucket counters across replicas (by le), then compute the quantile from the merged histogram, e.g. histogram_quantile(0.95, sum by (le) (rate(latency_bucket[5m])))",
+  "Average the P95 values reported by each replica",
+  "Take the maximum of the replicas' P95 values",
+  "Take the median replica's P95",
+]
+answer = ["A"]
+explanation = """
+Percentiles don't average: a small, slow replica would get the same weight as a large, fast one.
+In this lab's example the average of two P95s is 0.48 s while the true merged P95 is 0.33 s.
+Histogram buckets are counts, which add up correctly across replicas. The max and median of
+per-replica values are also not the service's P95.
+"""
+
+[[questions]]
+id = "08-12"
+topic = "Counters and rate"
+question = "Why are Triton metrics such as nv_inference_request_success usually queried with rate() in PromQL?"
+options = [
+  "rate() converts them to percentiles",
+  "They are counters that only increase since the server started; rate() gives the per-second increase over a recent window, which is what dashboards and alerts need",
+  "rate() is required to read any Prometheus metric",
+  "rate() removes GPU metrics from the result",
+]
+answer = ["B"]
+explanation = """
+A counter's raw value is a lifetime total and mostly reflects uptime. rate() over a window such as
+[1m] turns it into current throughput, and ratios of rates give averages (queue time per request,
+batch size). Gauges such as GPU utilisation are read directly. rate() doesn't compute percentiles.
+"""
+
+[[questions]]
+id = "08-13"
+topic = "Circuit breaker"
+question = "In the circuit-breaker pattern, what happens in the half-open state?"
+options = [
+  "All requests are rejected permanently",
+  "Requests are sent to two dependencies at once",
+  "After the cool-down, a limited trial request is allowed through; success closes the circuit, failure re-opens it",
+  "The breaker restarts the failing service",
+]
+answer = ["C"]
+explanation = """
+Open means failing fast without calling the dependency. After the reset timeout the breaker lets a
+probe through (half-open) to check whether the dependency has recovered, then closes or re-opens.
+It never rejects permanently, doesn't duplicate requests, and doesn't restart services.
+"""
+
+[[questions]]
+id = "08-14"
+topic = "Retry jitter"
+question = """
+After a brief outage, all clients retry with the same fixed exponential backoff, and the service
+is knocked down again by synchronised waves of retries. What fixes this?
+"""
+options = [
+  "Remove all retries",
+  "Retry immediately without delay",
+  "Use a constant 1-second delay for every retry",
+  "Add jitter: randomise each retry's delay (for example uniformly between 0 and the exponential bound) so clients spread out",
+]
+answer = ["D"]
+explanation = """
+Identical schedules synchronise clients into a thundering herd. Full jitter decorrelates them while
+keeping the exponential growth of the bound. Removing retries loses resilience, and immediate or
+constant delays keep the waves aligned.
+"""
+
+[[questions]]
+id = "08-15"
+topic = "Idempotency"
+question = "Which requests are safe to retry automatically after a timeout?"
+options = [
+  "Idempotent requests, whose repeated execution has the same effect as one (for example a stateless inference call), or requests made idempotent with an idempotency key",
+  "Any request, because retries never cause side effects",
+  "Only requests that failed with HTTP 400",
+  "Only requests larger than 1 MB",
+]
+answer = ["A"]
+explanation = """
+A timeout doesn't tell you whether the server executed the request. Retrying a non-idempotent
+operation (charging a card, sending an email, an agent's tool action) can do it twice. Pure
+inference calls are naturally safe. 4xx errors are usually client mistakes that retrying won't fix, and size is irrelevant.
+"""
+
+[[questions]]
+id = "08-16"
+topic = "Text drift"
+question = "How can input drift be monitored for an LLM application whose inputs are free text?"
+options = [
+  "It cannot; drift only applies to numeric features",
+  "Compare embeddings of recent prompts with a reference period (centroid distance, cluster or topic mix), plus simple statistics such as prompt length and language mix",
+  "Measure GPU temperature",
+  "Count the number of model replicas",
+]
+answer = ["B"]
+explanation = """
+Embeddings turn text into vectors, so distribution shift becomes measurable: distances between
+centroids, changes in cluster proportions, or PSI on cluster assignments. Length and language
+distributions are cheap extra signals. GPU temperature and replica counts are operational metrics, not input drift.
+"""
+
+[[questions]]
+id = "08-17"
+topic = "Concept drift"
+question = "What distinguishes concept drift from data (covariate) drift?"
+options = [
+  "Concept drift only happens on GPUs",
+  "Concept drift means the input distribution changed; data drift means the labels changed",
+  "They are the same thing",
+  "Concept drift means the relationship between inputs and the correct output changes (the same input now needs a different answer); it usually needs labels or feedback to detect, unlike input drift",
+]
+answer = ["D"]
+explanation = """
+Data drift is a change in what inputs look like, detectable without labels (PSI, KS, embeddings).
+Concept drift is a change in what the right answer is, for example a new policy that makes old
+answers wrong. It shows up in quality metrics, labels and user feedback, so monitoring must include
+outcome signals, not just input statistics.
+"""
+
+[[questions]]
+id = "08-18"
+topic = "Shadow deployment"
+question = "What is the main cost of a shadow deployment for an LLM service?"
+options = [
+  "Users see the new model's possibly wrong answers",
+  "It requires deleting the current model",
+  "Every mirrored request is processed twice, roughly doubling inference compute (GPU cost) for the shadowed traffic",
+  "It cannot measure latency",
+]
+answer = ["C"]
+explanation = """
+Shadow traffic is invisible to users, since their answers come from the current model, but the new
+model does real work on real inputs, which costs GPU time. You can shadow a sample of traffic to
+limit this. It needs no deletion, and it's a good way to measure the new model's latency and outputs.
+"""
+
+[[questions]]
+id = "08-19"
+topic = "Alerting practice"
+question = "Which alerting practices reduce noise while catching real incidents? (Select TWO.)"
+options = [
+  "Alert on user-facing symptoms (latency SLOs, error rates, burn rate) rather than on every internal cause",
+  "Attach a runbook to every alert, describing what it means and what to do first",
+  "Page on every single failed request",
+  "Page when CPU usage exceeds 80% on GPU inference nodes",
+  "Disable alerts at night",
+]
+answer = ["A", "B"]
+explanation = """
+Symptom-based alerts fire when users are affected, and runbooks make them actionable. Per-request
+paging creates alert fatigue, CPU is a poor saturation signal for GPU inference, and disabling
+alerts at night leaves outages unnoticed.
+"""
+
+[[questions]]
+id = "08-20"
+topic = "LLM SLOs"
+question = "Which service-level indicators best capture the user experience of a streaming chat assistant? (Select TWO.)"
+options = [
+  "Time to first token (TTFT) at a high percentile",
+  "Inter-token latency (ITL / time per output token) at a high percentile",
+  "Total GPU memory installed",
+  "Number of model parameters",
+  "Average CPU utilisation",
+]
+answer = ["A", "B"]
+explanation = """
+In streaming chat, users feel how quickly text starts and how smoothly it flows. Tail TTFT and ITL
+measure both, and error rate completes the picture. Installed memory, parameter count and CPU
+utilisation describe the deployment, not the experience.
+"""
+
+[[questions]]
+id = "08-21"
+topic = "ECC errors"
+question = "What is the difference between single-bit and double-bit ECC errors reported by DCGM?"
+options = [
+  "Single-bit errors are corrected by the hardware (worth trending); double-bit errors are uncorrectable and can corrupt results, so the GPU should be drained and diagnosed",
+  "Both are always corrected automatically",
+  "Double-bit errors are harmless; single-bit errors crash the GPU",
+  "ECC errors only affect CPU memory",
+]
+answer = ["A"]
+explanation = """
+ECC corrects single-bit flips, and a rising rate is an early warning. Double-bit (DBE) errors are
+detected but can't be corrected, so outputs may be wrong. Remove the GPU from service (drain the
+node) and run DCGM diagnostics. GPU HBM has its own ECC, separate from CPU memory.
+"""
+
+[[questions]]
+id = "08-22"
+topic = "Quality monitoring"
+question = """
+Latency and error rates are healthy, but you need to know whether answer quality is degrading in
+production. Which signals help? (Select TWO.)
+"""
+options = [
+  "Explicit user feedback (thumbs up/down, corrections) tracked per model version",
+  "Periodic LLM-as-judge or human review of a sample of production conversations against a rubric",
+  "GPU fan speed",
+  "The number of Kubernetes namespaces",
+  "Container image size",
+]
+answer = ["A", "B"]
+explanation = """
+Quality isn't visible in infrastructure metrics. Direct feedback and scored samples (a judge
+calibrated against humans, Lab 09) reveal regressions and concept drift. Fan speed, namespaces and
+image size tell you nothing about answers.
+"""
+
+[[questions]]
+id = "08-23"
+topic = "Graceful degradation"
+question = """
+The primary 70B model's cluster is overloaded during a traffic spike. Which strategy keeps the
+service useful rather than failing requests?
+"""
+options = [
+  "Return HTTP 500 for all requests until the spike ends",
+  "Graceful degradation: route overflow or non-critical traffic to a smaller fallback model or cached answers, with rate limiting and priorities",
+  "Disable all monitoring to save resources",
+  "Increase max_tokens for every request",
+]
+answer = ["B"]
+explanation = """
+A smaller model, cached responses or reduced features keep users served at lower quality, while
+rate limits protect the primary system. Blanket errors fail everyone, disabling monitoring hides the
+problem, and longer outputs increase load.
+"""
+
+[[questions]]
+id = "08-24"
+topic = "A/B testing"
+question = "When is an A/B test the right tool for comparing two model versions, rather than a canary alone?"
+options = [
+  "When you only need to check that the new version doesn't crash",
+  "When you want zero user exposure",
+  "When you need a statistically sound comparison of user or business outcomes (for example task success or retention) between versions, with enough traffic and time for significance",
+  "When the two versions have different tokenizers",
+]
+answer = ["C"]
+explanation = """
+A canary is a safety check (latency, errors) on a small slice before full rollout. An A/B test
+randomly assigns users to measure which version performs better on outcomes, which needs sample
+size and duration. Crash checks are canary territory, zero exposure means shadow, and tokenizers are irrelevant.
+"""

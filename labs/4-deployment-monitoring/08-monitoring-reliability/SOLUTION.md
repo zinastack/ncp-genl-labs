@@ -1,201 +1,282 @@
 # Lab 08 — Solution walkthrough
 
-How each exercise works, why each line exists, worked numbers (computed by running
-`solutions.py`), and the exam link.
+Every exercise is explained in four parts:
 
-The picture: once a model is live, you need to know **is it fast, is it working, is it still
-accurate**, and be able to **change versions safely**. Each exercise turns raw telemetry into a
-decision.
+- **Why it exists:** the problem it solves. This is what the exam tests.
+- **How it works:** the idea, with a small example using real numbers (computed by running `solutions.py`).
+- **The code:** why each line is there.
+- **On the exam:** a question in the exam's style, with **why each wrong answer is wrong**.
+
+The picture: once a model is live you must know three things: **is it fast, is it working, is it
+still accurate?** You also need to **change versions safely** and **survive failures**. Each exercise
+turns raw telemetry into a decision.
 
 ```
-latency & errors (1, 5) ─┐
-Triton metrics (2)      ─┼─► dashboards + alerts ─► on-call
-anomalies (3)           ─┘
-drift (4) ─► retrain? (6) ─► registry (7) ─► canary (8) ─► promote / rollback
+latency (1, 9) & errors (5) ─┐
+Triton metrics (2)           ├─► dashboards + alerts ─► on-call
+anomalies (3), GPU health (13)┘
+input drift (4, 12) ─► retrain? (6) ─► registry (7) ─► canary (8) ─► promote / rollback
+failing dependencies ─► timeouts + backoff (11) + circuit breaker (10)
 ```
+
+| Layer | Signals | Source |
+|---|---|---|
+| Service ("golden signals") | latency P50/P95/P99, traffic, errors, saturation (queue time) | Triton `:8002/metrics`, NIM, gateway |
+| LLM-specific | **TTFT, ITL/TPOT**, tokens/s, token counts, KV-cache use | NIM / TensorRT-LLM / vLLM metrics |
+| GPU | utilisation, memory, power, temperature, **XID / ECC errors** | **DCGM exporter** |
+| Quality | input/output drift, refusal rate, guardrail triggers, user feedback, judge scores | logs, evaluation jobs |
 
 ---
 
 ## Exercise 1 — `latency_summary`: percentiles, not averages
 
-Ten requests: `[12, 15, 11, 14, 13, 200, 12, 16, 13, 14]` ms, with one slow outlier.
+### Why it exists
 
-| metric | value | what it tells you |
-|---|---|---|
-| mean | 32 ms | misleading: no request actually took ~32 ms |
-| P50 (median) | 13 ms | the typical user |
-| P95 | 200 ms | the unlucky 5%: this is what an SLO targets |
-| max | 200 ms | |
+Ten requests `[12, 15, 11, 14, 13, 200, 12, 16, 13, 14]` ms: the **mean is 32 ms**, yet no request
+took anywhere near 32 ms. **P50 = 13 ms** is the typical user and **P95 = 200 ms** is the unlucky tail.
+SLOs are written on percentiles because users feel the tail.
 
-The average hides the tail, and users feel the tail. **Nearest-rank percentile:** sort, then take
-the value at position `ceil(p/100 · n) − 1`. For 1…100 ms that gives P50 = 50, P95 = 95, P99 = 99.
+Nearest-rank percentile: sort, then take position `ceil(p/100 · n) − 1`. For 1…100 ms: P50 = 50, P95 = 95, P99 = 99.
 
-> **Exam trap:** don't average percentiles across replicas (the average of P99s is not the P99).
-> Aggregate histograms, then compute the percentile.
+### On the exam
+
+*The dashboard shows 180 ms average, well under the 500 ms target, but users complain:* track **tail
+percentiles (P95/P99) from histograms**, plus **TTFT and ITL** for streaming. Averaging per-replica P99s is statistically wrong (exercise 9).
 
 ---
 
 ## Exercise 2 — `parse_prometheus` + Triton metrics
 
-Triton exposes plain-text metrics on port 8002:
+### Why it exists
 
-```
-nv_inference_request_success{model="text_classifier",version="1"} 1000
-nv_inference_count{model="text_classifier",version="1"} 1000
-nv_inference_exec_count{model="text_classifier",version="1"} 200
-nv_inference_queue_duration_us{model="text_classifier",version="1"} 2500000
-```
+Triton's metrics are **counters** (running totals). Meaning comes from **ratios**:
 
-**Parsing:** skip `#` comment lines and split each line into name, `{labels}` and value. The key is
-`(name, frozenset(labels))`, because a frozenset is hashable, so it works as a dict key, and its
-label order doesn't matter.
-
-**These are counters** (running totals since start), so meaning comes from **ratios**:
-
-| question | formula | here |
+| question | formula | example |
 |---|---|---|
-| average queue wait | `queue_duration_us / request_success` | 2,500,000 / 1000 = 2,500 µs = **2.5 ms** |
-| average dynamic batch size | `inference_count / exec_count` | 1000 / 200 = **5** requests per GPU execution |
+| average queue wait | `nv_inference_queue_duration_us / nv_inference_request_success` | 2,500,000 / 1,000 = **2.5 ms** |
+| average dynamic batch size | `nv_inference_count / nv_inference_exec_count` | 1,000 / 200 = **5** |
 
-In Prometheus you'd write the same ratio with `rate(...[1m])` on top and bottom to get the value
-over the last minute. The shipped `alerts.yml` defines these as recording rules.
+The key `(name, frozenset(labels))` is hashable and independent of label order. In PromQL, wrap both
+sides in `rate(...[1m])` to get recent values; `alerts.yml` defines these as recording rules.
+
+### On the exam
+
+*inference_count +12,000 and exec_count +1,500 in a minute:* **dynamic batching forms batches of about 8.**
+Failures are in `nv_inference_request_failure` and GPU utilisation is in `nv_gpu_utilization` / DCGM.
 
 ---
 
 ## Exercise 3 — `rolling_zscore_anomalies`: spotting spikes
 
-Compare each new value with the **previous window** (not including itself):
-
-```
-values [20, 21, 19, 20, 22, 20, 45, 21], window 5, threshold 3
-at index 6: previous 5 = [21, 19, 20, 22, 20] → mean 20.4, std 1.02
-z = (45 − 20.4) / 1.02 = 24 > 3 → anomaly at index 6
-```
-
-- The window *before* `i` matters: including the spike itself would inflate the std and hide it.
-- `std == 0` (a perfectly flat series) is skipped to avoid dividing by zero.
-- Production uses seasonal baselines (weekday vs weekend), but the idea is the same.
+Compare each value with the **previous** window: `[20, 21, 19, 20, 22, 20, 45, 21]`, window 5 → at
+index 6, mean 20.4 and std 1.02, so z = 24, an anomaly. Excluding the current point matters, because a spike
+included in its own baseline inflates the std and hides itself. Production adds seasonality (weekday vs weekend baselines).
 
 ---
 
 ## Exercise 4 — `psi` and `ks_statistic`: has the input changed?
 
-A model trained on one distribution degrades when production inputs **drift**, for example users
-start pasting longer documents. Compare today's feature (prompt length here) with the training reference.
+### Why it exists
 
-### PSI (population stability index)
+A model trained on one input distribution degrades when production inputs **drift**, for example users
+paste longer documents or ask about new topics. Compare today's distribution with the training reference.
 
-1. Cut the **reference** into 10 bins with equal counts (deciles, from `np.quantile`), and open the
-   outer edges to ±∞ so every new value lands somewhere.
-2. Compute the fraction of each sample per bin, clipped to at least 1e-6 so `ln(0)` can't happen.
-3. `PSI = Σ (actual − expected) · ln(actual / expected)`.
-
-| production distribution (reference mean 100, sd 20) | PSI | KS |
+| production (reference mean 100, sd 20) | PSI | KS |
 |---|---|---|
-| same (100, 20) | 0.002 | 0.009 |
+| same | 0.002 | 0.009 |
 | mean 105 | 0.057 | 0.101 |
 | mean 115, sd 22 | 0.472 | 0.276 |
 | mean 130, sd 25 | 1.486 | 0.502 |
 
-Rule of thumb: **< 0.1 stable, 0.1–0.25 moderate, > 0.25 significant drift.**
+**PSI rule of thumb: < 0.1 stable, 0.1–0.25 moderate, > 0.25 significant.** PSI uses equal-count bins
+of the reference, with outer edges opened to ±∞, and fractions clipped to avoid `ln(0)`. KS is the largest gap between the two cumulative distributions.
 
-### KS statistic
+### On the exam
 
-The biggest vertical gap between the two **cumulative** distributions:
-`[1,2,3]` vs `[4,5]` gives 1.0 (completely separate), and `[1,3,5]` vs `[2,4,6]` gives 0.33 (interleaved).
-Code: sort both, evaluate each empirical CDF at every observed point with `searchsorted(side="right")`,
-and take the max absolute difference.
-
-> Drift is a **trigger to investigate** (evaluate on fresh labelled data), not proof the model got worse.
+*PSI = 0.34 on prompt length and topic features:* **significant drift → evaluate on recent labelled data,
+then retrain through the evaluation gates** if quality dropped. Drift is a trigger to investigate, not proof of degradation.
 
 ---
 
 ## Exercise 5 — `burn_rate` / `should_page`: alerting on SLOs
 
-SLO 99.9% success → the **error budget** is 0.1% of requests.
+### Why it exists
 
-```
-burn rate = observed error rate / allowed error rate (1 − SLO)
-```
+A 99.9% SLO gives an **error budget** of 0.1%. **Burn rate = observed error rate ÷ allowed error rate.**
+At 1× the budget lasts exactly the SLO period; at 14.4× a 30-day budget is gone in about 2 days.
 
-| window | errors / total | error rate | burn rate |
-|---|---|---|---|
-| 5 min | 200 / 1,000 | 20% | **200×** |
-| 1 hour | 1,600 / 100,000 | 1.6% | **16×** |
-| 1 hour (blip only) | 500 / 100,000 | 0.5% | 5× |
-
-A burn rate of 1 would use exactly the whole budget over the SLO period. At 14.4× a 30-day budget is
-gone in about 2 days. **Page only if both windows exceed the threshold**: the short window proves
-it's happening *now*, and the long window proves it's not a 30-second blip. The third row shows a
-short spike with a calm hour, so no page.
-
----
-
-## Exercise 6 — `retraining_decision`: retrain for a reason
-
-Three independent triggers, reported in a fixed order:
-
-| trigger | condition | example |
+| window | errors / total | burn |
 |---|---|---|
-| `drift` | PSI > 0.25 | inputs changed significantly |
-| `quality_drop` | baseline − current accuracy > 3 points | 0.92 → 0.88 |
-| `new_data` | ≥ 5,000 new labelled examples | enough to learn something new |
+| 5 min | 200 / 1,000 | 200× |
+| 1 h | 1,600 / 100,000 | 16× → **page** (both windows above 14.4) |
+| 1 h, blip only | 500 / 100,000 | 5× → no page |
 
-Returning the **reasons** (not just True/False) makes the decision auditable. A retrained model
-still has to pass the **same evaluation gates** before promotion, so never auto-deploy.
+**Page only if both windows burn fast**: the short one proves it's happening now, and the long one proves it isn't a blip.
 
 ---
 
-## Exercise 7 — `ModelRegistry`: versions, promotion, rollback
+## Exercise 6 — `retraining_decision`
 
-State: each version has a stage (`staging` → `production` → `archived`), plus a **history** list of
-production versions in promotion order.
+Three triggers, returned as **reasons** for auditability: `drift` (PSI > 0.25), `quality_drop`
+(accuracy fell more than 3 points), `new_data` (≥ 5,000 new labels). A retrained model still passes the **same
+evaluation gates** before promotion. Never auto-deploy, and don't retrain on a fixed schedule regardless of evidence.
+
+---
+
+## Exercise 7 — `ModelRegistry`: versions, gates, rollback
 
 ```
-register v1, v2, v3(eval failed)       all staging
-promote v1                              v1 production              history [v1]
-promote v2                              v2 production, v1 archived history [v1, v2]
-promote v3                              refused: eval_passed is False (the gate)
-rollback                                v1 production, v2 archived history [v1]
-rollback                                refused: nothing left to roll back to
+register v1, v2, v3 (eval failed) → promote v1 → promote v2 (v1 archived)
+promote v3 → refused (evaluation gate)  → rollback → v1 production, v2 archived
 ```
 
-- `promote` checks the **evaluation gate** first, so a failing model can never reach production.
-- `rollback` pops the current version from history and restores the previous one: one step, no guessing.
-- Real registries (MLflow, W&B, NGC) add lineage (data, code, metrics) and also version the
-  tokenizer, prompt templates and guardrail config, because all of them change behaviour.
+- The **evaluation gate** sits inside `promote`: a failing model can't reach production.
+- **One-step rollback** restores the previous production version.
+- Version everything that changes behaviour: **weights, tokenizer, prompt templates, generation parameters, guardrail config**.
+  *"The weights are fine but prod quality dropped; the template differs from evaluation"* is exactly this gap.
 
 ---
 
-## Exercise 8 — `canary_route` / `canary_verdict`: safe rollouts
+## Exercise 8 — `canary_route` / `canary_verdict`
 
-**Sticky routing:** hash the user id, take `% 100`, and send the user to the canary if the result is
-below the percentage. The same user always lands on the same version (a consistent experience and
-clean comparisons), and about 10% of 5,000 users went to the canary (measured: 9.5%).
+**Sticky routing:** hash the user id mod 100 and compare with the canary %. The same user always sees
+the same version (measured: 9.5% of 5,000 users routed to a 10% canary).
+**Verdict** from the **same time window**: roll back if P95 regresses more than 10% or errors rise more than 0.5 points.
 
-**Verdict** (same time window for both, so traffic changes don't confuse the comparison):
+| pattern | how | risk / cost |
+|---|---|---|
+| **shadow** | mirror traffic to the new model, discard its answers | zero user impact; doubles inference cost |
+| **canary** | small % of real users, compare, then promote or roll back | limited blast radius |
+| **blue-green** | two full environments, instant switch | 2× resources during the switch |
+| **A/B test** | statistically powered comparison of business metrics | needs traffic and time |
 
-| canary vs stable (P95 200 ms, errors 0.2%) | result |
-|---|---|
-| P95 210 ms, errors 0.3% | promote (+5% latency, +0.1 points of errors are within limits) |
-| P95 260 ms | rollback (+30% latency) |
-| errors 2% | rollback |
-
-Other patterns to know: **shadow** (mirror traffic, discard the responses, zero user risk),
-**blue-green** (two full environments, instant switch), **A/B** (statistical comparison of business metrics).
+*"Validate on real traffic with zero user impact"* → shadow. *"Canary: +35% P95, 4× errors"* → automatic rollback.
 
 ---
 
-## How this lab maps to exam questions
+## Exercise 9 — `histogram_quantile`: aggregating latency correctly
 
-| If a question mentions… | Think… |
+### Why it exists
+
+With 10 replicas, each reporting its own P95, what is the **service's** P95? **Not the average of the
+P95s.** Prometheus solves this with **histograms**: each replica counts requests per latency bucket,
+counts **add up** across replicas, and the percentile is computed from the merged counts.
+
+### How it works
+
+Buckets (seconds) `[0.05, 0.1, 0.25, 0.5, 1.0, +Inf]`, cumulative counts:
+
+```
+replica A (900 fast requests): [800, 880, 895, 900, 900, 900]   P95 = 0.084 s
+replica B (100 slow requests): [  0,  10,  40,  80, 100, 100]   P95 = 0.875 s
+average of the two P95s: 0.480 s   ← wrong: gives the small slow replica half the weight
+merged  [800, 890, 935, 980, 1000, 1000] → true P95 = 0.333 s
+```
+
+Interpolation: the 950th request falls in bucket (0.25, 0.5], which holds requests 936–980, so
+`0.25 + 0.25 × (950 − 935) / (980 − 935) = 0.333`. If the rank lands in the +Inf bucket there's
+nothing to interpolate toward, so the last finite bound is returned (as Prometheus does). That's a reason to make the top bucket generous.
+
+### On the exam
+
+PromQL: `histogram_quantile(0.95, sum by (le) (rate(latency_bucket[5m])))`, which **sums the buckets
+first, then takes the quantile**. Averaging percentiles is a classic wrong answer.
+
+---
+
+## Exercise 10 — `CircuitBreaker`: stop calling a failing dependency
+
+### Why it exists
+
+When a downstream LLM endpoint becomes slow or broken, callers keep waiting and retrying. Threads
+pile up and **your** service goes down too (cascading failure). A **circuit breaker** notices repeated
+failures and **fails fast** for a while (serve a fallback: a smaller model, a cached answer, a
+polite error), then **probes** to see whether the dependency has recovered.
+
+```
+closed ──(3 failures)──► open ──(30 s cool-down)──► half_open ──success──► closed
+                          ▲                             │
+                          └───────── failure ───────────┘
+```
+
+The test walks every transition with a fake clock: three failures open it, calls are rejected while
+open, one trial is allowed after 30 s, a failed trial re-opens it immediately, and a successful trial closes it.
+
+---
+
+## Exercise 11 — `backoff_delays`: retry without a stampede
+
+### Why it exists
+
+Retrying immediately hammers a struggling service. Retrying on a fixed schedule makes **thousands of
+clients retry at the same moment** (a thundering herd). **Exponential backoff with full jitter** spreads retries out:
+
+```
+bounds (base 0.1 s, cap 2 s): 0.1, 0.2, 0.4, 0.8, 1.6, 2.0, 2.0
+each actual wait = random between 0 and the bound
+```
+
+Always pair retries with **timeouts** and a **retry limit**, and retry only **idempotent** requests.
+
+### On the exam (Select TWO)
+
+*A slow LLM dependency takes the whole API down:* ✅ **timeouts with bounded retries and exponential
+backoff with jitter**; ✅ **a circuit breaker with a fallback**. ❌ unlimited retries, ❌ no timeouts,
+❌ scaling the API tier 10× (it doesn't fix the dependency and can overload it further).
+
+---
+
+## Exercise 12 — `embedding_drift`: drift for text
+
+### Why it exists
+
+PSI and KS need numeric features. For LLM inputs the question is *"are users asking about different
+things?"*. Embed a sample of prompts (Lab 01, exercise 10) and compare with the reference period:
+
+```
+drift = 1 − cosine(mean embedding of reference, mean embedding of current)
+same topic: < 0.05          users moved to a different topic: > 0.8
+```
+
+Centroid distance is the simplest signal. Richer ones cluster the embeddings and compare the topic
+mix, or compute PSI on cluster assignments. Also track prompt length, language mix, refusal rate and
+guardrail triggers. Output drift is an early warning that needs no labels.
+
+---
+
+## Exercise 13 — `gpu_node_action`: acting on GPU health
+
+### Why it exists
+
+GPUs fail in ways that don't crash immediately: a GPU with **uncorrectable memory errors** can return
+**silently corrupted results**. **DCGM** (through dcgm-exporter into Prometheus) reports health, and
+some signals demand removing the node.
+
+| DCGM signal | meaning | action |
+|---|---|---|
+| `DCGM_FI_DEV_XID_ERRORS > 0` | driver-reported GPU fault | **drain** |
+| `DCGM_FI_DEV_ECC_DBE_VOL_TOTAL > 0` | uncorrectable (double-bit) ECC errors | **drain** |
+| `DCGM_FI_DEV_GPU_TEMP ≥ 85 °C` | overheating: throttling, instability | alert, check cooling |
+
+### On the exam
+
+*One node returns corrupted outputs and later crashes; DCGM shows XID and rising ECC errors:*
+**cordon and drain the node, run DCGM diagnostics (`dcgmi diag`), and let the scheduler move workloads.**
+"Increase the batch size", "ECC errors are always corrected" (single-bit ones are; double-bit ones aren't)
+and "restart hourly" are wrong.
+
+---
+
+## Quiz topic → where you learn it in this lab
+
+| Quiz topic | Exercise |
 |---|---|
-| average looks fine, users complain | P95/P99 from histograms; TTFT/ITL for LLMs |
-| inference_count / exec_count | average batch size |
-| queue_duration / request_success | average queue time: a scaling signal |
-| PSI 0.3 | significant drift → evaluate, then retrain through gates |
-| page on real incidents without noise | multi-window burn-rate alerts |
-| validate with zero user impact | shadow deployment |
-| canary regressed | automatic rollback |
-| weights fine but prod quality dropped | version prompts, templates and params with the model |
-| XID / ECC errors | cordon and drain the node, run DCGM diagnostics |
+| Latency metrics | 1, 9 |
+| Triton metrics | 2 |
+| Data drift | 4, 12 |
+| SLO burn rate | 5 |
+| Automated retraining | 6 |
+| Version management | 7 |
+| Rollout strategies, canary analysis | 8 |
+| Reliability patterns | 10, 11 |
+| GPU health | 13 |
