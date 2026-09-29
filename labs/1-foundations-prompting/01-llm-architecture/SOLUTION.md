@@ -141,6 +141,40 @@ A dot product sums `d_k` products, so its spread grows like `√d_k`. Measured o
 softmax nearly one-hot (8 random scores at d=512: top weight 0.985 unscaled vs 0.308 scaled), and
 nearly one-hot means **vanishing gradients**.
 
+### Common confusion: "but the rows sum to 1 after the division"
+
+They do after the **whole** attention step, but that comes from **softmax**, not from the division.
+The division happens *before* softmax and changes something else. Follow one row (query "token 1"
+from the table above):
+
+| step | row | sums to |
+|---|---|---|
+| raw scores `q·k` | `[1, 0, 1]` | 2 |
+| **after ÷ √d_k** (√2) | `[0.707, 0, 0.707]` | **1.414**, not 1 |
+| after softmax | `[0.401, 0.198, 0.401]` | **1** |
+
+The division alone doesn't normalise anything. And softmax gives rows that sum to 1 **with or without** the division:
+
+```
+softmax([1, 0, 1])           = [0.422, 0.155, 0.422]    sums to 1
+softmax([0.707, 0, 0.707])   = [0.401, 0.198, 0.401]    sums to 1
+```
+
+So "each row sums to one" can't be the *reason* for the division. What the division changes is **how
+sharp** the weights are. With a realistic d_k = 64, a row of raw scores `[16, 0, 8]`:
+
+| | softmax result |
+|---|---|
+| **without** ÷ √64 | `[0.9997, 0.0000, 0.0003]`: almost all weight on one token (saturated) |
+| **with** ÷ √64 → `[2, 0, 1]` | `[0.665, 0.090, 0.245]`: a smooth blend |
+
+Both sum to 1. In the saturated one, nudging a score barely changes the output, so gradients are
+tiny and **learning stalls**. Dividing by √d_k keeps softmax in its smooth, trainable range.
+
+> **Exam technique:** place the operation in the pipeline
+> **scores → ÷√d_k → mask → softmax → × V**, then ask what *that specific step* changes.
+> Distractors often state something true about attention (rows sum to 1) but attach it to the wrong step.
+
 ### The code
 
 `np.swapaxes(k, -1, -2)` transposes only the last two axes, so batch and head dimensions pass
@@ -154,7 +188,7 @@ what attention visualisations plot.
 | option | verdict |
 |---|---|
 | To keep dot products from growing with dimension, which would push softmax into saturated regions with vanishing gradients | ✅ |
-| To normalise attention weights so each row sums to one | ❌ softmax already does that |
+| To normalise attention weights so each row sums to one | ❌ true of attention, but it's **softmax** that does it (with or without the division; see "Common confusion" above) |
 | To reduce the FLOPs of the attention matmul | ❌ dividing costs extra; nothing is saved |
 | To make attention invariant to token order | ❌ attention is *already* order-blind, which is the problem exercise 5 solves |
 
