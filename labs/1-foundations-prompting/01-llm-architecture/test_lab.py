@@ -103,3 +103,88 @@ def test_10_masked_mean_pool(lab):
     out = lab.masked_mean_pool(hidden, mask)
     np.testing.assert_allclose(out[0], hidden[0, :2].mean(0))
     np.testing.assert_allclose(out[1], hidden[1].mean(0))
+
+
+def test_11_embed_and_tied_head(lab):
+    emb = np.array([[1.0, 0.0], [0.0, 1.0], [0.7, 0.7]])  # vocab 3, d 2
+    ids = np.array([[2, 0], [1, 1]])
+    out = lab.embed(ids, emb)
+    assert out.shape == (2, 2, 2)
+    np.testing.assert_array_equal(out[0, 0], emb[2])
+    np.testing.assert_array_equal(out, np.eye(3)[ids] @ emb)  # lookup == one-hot @ embedding
+    logits = lab.lm_head(np.array([[0.9, 0.1]]), emb)
+    assert logits.shape == (1, 3) and np.argmax(logits) == 0, "hidden state closest to token 0's embedding"
+    # Round trip: the tied head scores a token's own embedding highest.
+    assert np.argmax(lab.lm_head(lab.embed(np.array([1]), emb), emb)) == 1
+
+
+def test_12_encoder_padding_mask(lab):
+    m = lab.padding_mask(np.array([[1, 1, 1, 0]]))
+    assert m.shape == (1, 1, 4) and m.dtype == bool
+    x = rng.normal(size=(1, 4, 8))
+    out, w = lab.scaled_dot_product_attention(x, x, x, m)
+    assert w[0, 0, 2] > 0, "encoders are bidirectional: token 0 attends to token 2 (after it)"
+    assert np.all(w[..., 3] == 0), "nobody attends to padding"
+    x2 = x.copy()
+    x2[0, 3] += 100  # change only the padding token
+    out2, _ = lab.scaled_dot_product_attention(x2[:, :3], x2, x2, m)
+    np.testing.assert_allclose(out2, out[:, :3])  # padding must not affect real tokens
+
+
+def test_12_cross_attention(lab):
+    d = 8
+    x_dec, enc = rng.normal(size=(3, d)), rng.normal(size=(5, d))
+    ws = [rng.normal(size=(d, d)) for _ in range(3)]
+    out = lab.cross_attention(x_dec, enc, *ws)
+    assert out.shape == (3, d)
+    x_dec2 = x_dec.copy()
+    x_dec2[2] += 1  # a decoder token only changes its OWN row
+    np.testing.assert_allclose(lab.cross_attention(x_dec2, enc, *ws)[:2], out[:2])
+    enc2 = enc.copy()
+    enc2[4] += 1    # any source token can affect every decoder row
+    assert not np.allclose(lab.cross_attention(x_dec, enc2, *ws)[0], out[0])
+    mask = np.array([True, True, True, True, False])
+    # A masked (padding) source token must be ignored, even though it changed.
+    np.testing.assert_allclose(lab.cross_attention(x_dec, enc2, *ws, enc_mask=mask),
+                               lab.cross_attention(x_dec, enc, *ws, enc_mask=mask))
+
+
+def test_13_transformer_block(lab):
+    x = rng.normal(size=(4, 6)) * 5 + 3
+    zero = lambda z: np.zeros_like(z)
+    norm = lambda z: (z - z.mean(-1, keepdims=True)) / z.std(-1, keepdims=True)
+    # Pre-norm keeps a clean residual path: with empty sub-layers the block is the identity.
+    np.testing.assert_allclose(lab.transformer_block(x, zero, zero, norm, pre_norm=True), x)
+    # Post-norm normalises the residual stream itself, so even empty sub-layers change x.
+    post = lab.transformer_block(x, zero, zero, norm, pre_norm=False)
+    np.testing.assert_allclose(post, norm(x))
+    double = lambda z: 2 * z
+    np.testing.assert_allclose(lab.transformer_block(x, double, zero, norm), x + 2 * norm(x))
+
+
+def test_14_flash_attention_is_exact(lab):
+    q, k, v = (rng.normal(size=(10, 8)) for _ in range(3))
+    for causal in (False, True):
+        mask = np.tril(np.ones((10, 10), bool)) if causal else None
+        ref, _ = lab.scaled_dot_product_attention(q, k, v, mask)
+        for block in (1, 3, 4, 10):
+            np.testing.assert_allclose(lab.flash_attention(q, k, v, block, causal), ref, atol=1e-12)
+
+
+def test_15_moe(lab):
+    x = rng.normal(size=(5, 4))
+    router = rng.normal(size=(4, 3))
+    experts = rng.normal(size=(3, 4, 4))
+    out, chosen = lab.moe_layer(x, router, experts, top_k=2)
+    assert out.shape == (5, 4) and chosen.shape == (5, 2)
+    logits = x @ router
+    t = 0
+    e1, e2 = np.argsort(-logits[t])[:2]
+    assert list(chosen[t]) == [e1, e2]
+    g = np.exp(logits[t, [e1, e2]]) / np.exp(logits[t, [e1, e2]]).sum()
+    np.testing.assert_allclose(out[t], g[0] * x[t] @ experts[e1] + g[1] * x[t] @ experts[e2])
+    same = np.repeat(np.eye(4)[None] * 2, 3, axis=0)  # identical experts → output = 2x
+    np.testing.assert_allclose(lab.moe_layer(x, router, same, top_k=3)[0], 2 * x)
+    total, active = lab.moe_param_counts(4096, 14336, 8, 2, 32)  # Mixtral-8x7B-shaped
+    assert total == 32 * 8 * 3 * 4096 * 14336 and active * 4 == total
+    assert round(total / 1e9, 1) == 45.1 and round(active / 1e9, 1) == 11.3

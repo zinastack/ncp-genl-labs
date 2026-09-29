@@ -2,8 +2,9 @@
 
 > Blueprint: *understanding and applying foundational LLM structures and mechanisms.*
 
-You will build the core of a transformer from scratch in NumPy (attention, masking,
-multi-head attention, positional encodings, normalisation, pooling) and write the
+You will build the core of a transformer from scratch in NumPy (embeddings, attention, masking
+for all three architecture families, multi-head attention, positional encodings, normalisation,
+a full block, FlashAttention's tiling and a Mixture-of-Experts layer) and write the
 calculators the exam expects you to do in your head: parameter counts and KV-cache size.
 
 ```
@@ -104,6 +105,13 @@ Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through ever
 | 8 | `gpt2_param_count` | exact parameter accounting |
 | 9 | `kv_cache_bytes` | inference memory planning (MHA vs GQA) |
 | 10 | `masked_mean_pool` | sentence embeddings from an encoder |
+| 11 | `embed`, `lm_head` | token embeddings, weight tying, vocabulary-size trade-off |
+| 12 | `padding_mask`, `cross_attention` | encoder (bidirectional) and encoder-decoder attention |
+| 13 | `transformer_block` | residual connections, pre-norm vs post-norm |
+| 14 | `flash_attention` | tiled "online softmax": exact attention without the n×n matrix |
+| 15 | `moe_layer`, `moe_param_counts` | Mixture of Experts: top-k routing, total vs active parameters |
+
+Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`](SOLUTION.md).
 
 GPU part (`gpu_lab.py`): BERT pooling on a real model, GPT-2's real parameter count vs yours, a measured
 GQA KV cache vs your formula, and math vs memory-efficient vs FlashAttention kernels.

@@ -3,6 +3,8 @@
 Every function is explained step by step, with worked numeric examples, in SOLUTION.md.
 """
 
+from collections.abc import Callable
+
 import numpy as np
 
 
@@ -118,3 +120,91 @@ def masked_mean_pool(hidden: np.ndarray, attention_mask: np.ndarray) -> np.ndarr
     m = attention_mask[..., None].astype(hidden.dtype)  # (batch, seq, 1) broadcasts over features
     # Zero out padding, sum the real tokens, divide by how many real tokens there are.
     return (hidden * m).sum(axis=1) / np.clip(m.sum(axis=1), 1e-9, None)
+
+
+def embed(token_ids: np.ndarray, embedding: np.ndarray) -> np.ndarray:
+    # An embedding layer is just a row lookup: token id i → row i of the (vocab, d) matrix.
+    # (Mathematically the same as one_hot(ids) @ embedding, without building the one-hot.)
+    return embedding[token_ids]
+
+
+def lm_head(hidden: np.ndarray, embedding: np.ndarray) -> np.ndarray:
+    # Tied output layer: score every vocabulary token by the dot product of the hidden state
+    # with that token's embedding. Reusing the input matrix saves vocab × d parameters.
+    return hidden @ embedding.T
+
+
+def padding_mask(attention_mask: np.ndarray) -> np.ndarray:
+    # Encoder (BERT-style) mask: every query may see every REAL token, before or after it.
+    # (batch, seq) → (batch, 1, seq): the middle axis broadcasts over all queries.
+    return attention_mask.astype(bool)[:, None, :]
+
+
+def cross_attention(
+    x_dec: np.ndarray, enc_out: np.ndarray, w_q: np.ndarray, w_k: np.ndarray, w_v: np.ndarray,
+    enc_mask: np.ndarray | None = None,
+) -> np.ndarray:
+    # Encoder-decoder (T5, BART): queries come from the decoder, keys and values from the
+    # encoder's output. No causal mask: the whole source sentence is already known.
+    q, k, v = x_dec @ w_q, enc_out @ w_k, enc_out @ w_v
+    out, _ = scaled_dot_product_attention(q, k, v, enc_mask)  # enc_mask hides source padding
+    return out
+
+
+def transformer_block(
+    x: np.ndarray, attn_fn: Callable[[np.ndarray], np.ndarray], ffn_fn: Callable[[np.ndarray], np.ndarray],
+    norm_fn: Callable[[np.ndarray], np.ndarray], pre_norm: bool = True,
+) -> np.ndarray:
+    if pre_norm:
+        # Pre-norm (GPT-2 onwards, Llama): normalise the sub-layer INPUT; the residual path
+        # x → x + … is never touched, so signal and gradients flow straight through deep stacks.
+        x = x + attn_fn(norm_fn(x))
+        return x + ffn_fn(norm_fn(x))
+    # Post-norm (original Transformer, BERT): normalise AFTER adding, so every layer rescales
+    # the residual stream itself.
+    x = norm_fn(x + attn_fn(x))
+    return norm_fn(x + ffn_fn(x))
+
+
+def flash_attention(q: np.ndarray, k: np.ndarray, v: np.ndarray, block_size: int, causal: bool = False) -> np.ndarray:
+    n_q, d = q.shape
+    # Running statistics per query row: max score so far (m), softmax denominator so far (l),
+    # and the un-normalised weighted sum of values so far (acc).
+    m = np.full((n_q, 1), -np.inf)
+    l = np.zeros((n_q, 1))
+    acc = np.zeros((n_q, v.shape[1]))
+    rows = np.arange(n_q)[:, None]
+    for start in range(0, k.shape[0], block_size):
+        kb, vb = k[start : start + block_size], v[start : start + block_size]
+        s = q @ kb.T / np.sqrt(d)  # scores for this block only: (n_q, block), never (n_q, n_k)
+        if causal:
+            cols = np.arange(start, start + kb.shape[0])[None, :]
+            s = np.where(cols <= rows, s, -np.inf)
+        m_new = np.maximum(m, s.max(axis=1, keepdims=True))
+        p = np.exp(s - m_new)  # block weights relative to the NEW running max
+        # "Online softmax": earlier sums were computed against the old max; rescale them.
+        correction = np.exp(m - m_new)
+        l = l * correction + p.sum(axis=1, keepdims=True)
+        acc = acc * correction + p @ vb
+        m = m_new
+    return acc / l  # identical to softmax(QKᵀ/√d)·V: exact, not an approximation
+
+
+def moe_layer(x: np.ndarray, router_w: np.ndarray, expert_w: np.ndarray, top_k: int = 2) -> tuple[np.ndarray, np.ndarray]:
+    logits = x @ router_w  # (tokens, n_experts): how well each expert suits each token
+    chosen = np.argsort(-logits, axis=1)[:, :top_k]  # the top-k experts per token
+    top_logits = np.take_along_axis(logits, chosen, axis=1)
+    gates = softmax(top_logits, axis=1)  # renormalise over the chosen experts only
+    out = np.zeros_like(x)
+    for t in range(x.shape[0]):  # only top_k experts run per token: that's the compute saving
+        for slot in range(top_k):
+            e = chosen[t, slot]
+            out[t] += gates[t, slot] * (x[t] @ expert_w[e])
+    return out, chosen
+
+
+def moe_param_counts(d_model: int, d_ff: int, n_experts: int, top_k: int, n_layers: int) -> tuple[int, int]:
+    per_expert = 3 * d_model * d_ff  # SwiGLU FFN: gate, up and down matrices (no biases)
+    # All experts must sit in memory (any token may pick any expert), but each token only
+    # computes with top_k of them.
+    return n_layers * n_experts * per_expert, n_layers * top_k * per_expert
