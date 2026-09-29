@@ -7,7 +7,7 @@ Every lab combines three things:
 1. **Review notes** (`README.md`): the concepts, numbers and exam traps for one blueprint domain.
 2. **Exercises you implement** (`exercises.py`), checked by tests. They run on a laptop CPU in seconds.
    **`SOLUTION.md`** then explains every solution step by step, with worked numbers.
-3. **Exam-style questions** (`quiz.toml`): 138 scenario questions with explanations, including a timed mock exam.
+3. **Exam-style questions** (`quiz.toml`): 304 scenario questions with explanations, including a timed mock exam.
 
 Each lab also has a **GPU part** (`gpu_lab.py` plus section `make` targets) that runs your code on
 real models on a cheap cloud GPU (L4/T4 via Brev or AWS). See [brev/README.md](brev/README.md).
