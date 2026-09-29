@@ -349,3 +349,369 @@ dcgm-exporter exposes them as Prometheus metrics for Grafana dashboards and aler
 Compute is a per-kernel profiler, nccl-tests benchmarks collectives, and TensorRT is an inference
 optimizer.
 """
+
+[[questions]]
+id = "06-19"
+topic = "Reduce-scatter"
+question = "What is the result of a reduce-scatter collective across N GPUs?"
+options = [
+  "Every GPU receives the full sum of all GPUs' tensors",
+  "Every GPU receives every other GPU's tensor, concatenated",
+  "The tensors are summed across GPUs and each GPU keeps only its own 1/N slice of the sum",
+  "Rank 0 sends its tensor to all other ranks",
+]
+answer = ["C"]
+explanation = """
+Reduce-scatter combines a reduction (sum) with sharding of the result, which is exactly what ZeRO-2/3
+and FSDP need for gradients: each rank only updates its own shard. The full sum on every rank is
+all-reduce, concatenation is all-gather, and rank 0 sending to all is broadcast.
+"""
+
+[[questions]]
+id = "06-20"
+topic = "Ring all-reduce"
+question = "How is NCCL's ring all-reduce typically composed?"
+options = [
+  "A reduce-scatter pass followed by an all-gather pass, so each GPU sends about 2·(N−1)/N of the data",
+  "N separate broadcasts, one from each GPU",
+  "Every GPU sends its full tensor to every other GPU",
+  "An all-to-all followed by a broadcast",
+]
+answer = ["A"]
+explanation = """
+In the first pass each GPU ends up owning one fully reduced chunk (reduce-scatter). In the second,
+the chunks circulate so everyone has all of them (all-gather). The traffic per GPU stays near 2× the
+data size regardless of N, which makes the ring bandwidth-optimal. N broadcasts or all-pairs sends
+would move far more data.
+"""
+
+[[questions]]
+id = "06-21"
+topic = "FSDP communication"
+question = "Compared with DDP, how does FSDP FULL_SHARD (ZeRO-3) change per-step communication?"
+options = [
+  "It removes gradient communication entirely",
+  "It increases total communication volume moderately (about 1.5× DDP) by adding parameter all-gathers, in exchange for storing only 1/N of the model state per GPU",
+  "It reduces communication to zero because each GPU owns a shard",
+  "It multiplies communication by the number of GPUs",
+]
+answer = ["B"]
+explanation = """
+DDP's all-reduce moves about 2× the model size per GPU. ZeRO-3 replaces it with a gradient
+reduce-scatter (1×) plus parameter all-gathers in forward and backward (about 2× together), roughly
+3× in total, or 1.5× DDP. That's a modest price for an N-fold cut in model-state memory, and prefetching
+overlaps much of it. Communication never disappears and doesn't grow with N per GPU.
+"""
+
+[[questions]]
+id = "06-22"
+topic = "HYBRID_SHARD"
+question = """
+FSDP FULL_SHARD across 16 nodes is limited by slow inter-node bandwidth, but a full model replica
+fits within one 8-GPU node when sharded. Which strategy fits?
+"""
+options = [
+  "FSDP HYBRID_SHARD: shard within each node (fast NVLink) and replicate across nodes, so only gradient reduction crosses the slower network",
+  "Switch to tensor parallelism across all 16 nodes",
+  "Disable mixed precision",
+  "Use a single node only",
+]
+answer = ["A"]
+explanation = """
+Hybrid sharding keeps the chatty parameter all-gathers inside the NVLink domain, and inter-node
+traffic becomes a DDP-style gradient reduction across replicas. TP across nodes is the worst
+placement for a per-layer collective, FP32 doubles traffic, and a single node wastes the cluster.
+"""
+
+[[questions]]
+id = "06-23"
+topic = "CPU offload"
+question = "What is the main trade-off of ZeRO-Offload / FSDP CPU offload?"
+options = [
+  "It improves speed and memory at no cost",
+  "It is only for inference",
+  "It reduces the number of GPUs needed to zero",
+  "It lets models fit that otherwise wouldn't, by keeping optimizer state (and possibly parameters) in CPU RAM, but adds PCIe transfers and CPU compute that usually slow each step",
+]
+answer = ["D"]
+explanation = """
+CPU memory is large and cheap but connected over PCIe, which is much slower than HBM. Offload trades
+step time for capacity. It's useful when GPU memory is the hard limit (single-GPU fine-tuning of big
+models), and it's a training technique that still needs GPUs.
+"""
+
+[[questions]]
+id = "06-24"
+topic = "DDP buckets"
+question = "What is the effect of making DDP's gradient bucket size (bucket_cap_mb) very small?"
+options = [
+  "Gradients are averaged incorrectly",
+  "Communication can start earlier, but the many small all-reduce calls pay more per-message latency, which can lower throughput",
+  "Memory use doubles",
+  "Backward runs in reverse order",
+]
+answer = ["B"]
+explanation = """
+Buckets balance overlap (start early, so smaller is better) against efficiency (large messages use
+bandwidth well, so bigger is better). Tiny buckets mean many latency-bound collectives. The maths
+of the average is unchanged, memory isn't doubled, and backward always runs from the last layer to the first.
+"""
+
+[[questions]]
+id = "06-25"
+topic = "DDP unused parameters"
+question = """
+A DDP job whose model skips some layers conditionally fails with an error that the reduction for
+some parameters did not finish. What is the usual fix?
+"""
+options = [
+  "Set find_unused_parameters=True (or make every parameter participate in the loss), so DDP doesn't wait for gradients that will never arrive",
+  "Switch the backend from NCCL to gloo",
+  "Increase the learning rate",
+  "Remove the DistributedSampler",
+]
+answer = ["A"]
+explanation = """
+DDP expects every registered parameter to produce a gradient each step, and its buckets wait for
+all of them. Parameters that didn't take part would block the all-reduce, so DDP either needs to
+detect them (find_unused_parameters, with some overhead) or the model must use them all. The
+backend, learning rate and sampler don't cause this.
+"""
+
+[[questions]]
+id = "06-26"
+topic = "Host synchronisation"
+question = """
+Nsight Systems shows gaps between kernels at every training step, aligned with a line that logs
+loss.item() after each micro-batch. Why?
+"""
+options = [
+  "item() launches an expensive kernel",
+  "Logging is slow because of disk writes",
+  "item() copies the value to the CPU, forcing the CPU to wait for all queued GPU work, so the GPU runs dry while the CPU catches up",
+  "item() disables CUDA graphs permanently",
+]
+answer = ["C"]
+explanation = """
+CUDA is asynchronous: the CPU normally queues kernels ahead of the GPU. Any device-to-host read
+(.item(), .cpu(), printing a tensor) is a synchronisation point that drains the queue. Log less
+often or accumulate on the GPU. The kernel itself is tiny, disk isn't involved, and graphs aren't disabled permanently.
+"""
+
+[[questions]]
+id = "06-27"
+topic = "NCCL debugging"
+question = """
+Multi-node training is far slower than expected. You suspect NCCL isn't using InfiniBand. What is
+the most direct first check?
+"""
+options = [
+  "Run with NCCL_DEBUG=INFO and check which transport NCCL selects (for example IB/RoCE with GPUDirect RDMA vs TCP sockets), and benchmark with nccl-tests",
+  "Increase the learning rate",
+  "Switch from bf16 to fp32",
+  "Reboot the GPUs",
+]
+answer = ["A"]
+explanation = """
+NCCL logs the transports and network interfaces it picks. A silent fallback to TCP (wrong
+NCCL_SOCKET_IFNAME, IB disabled, missing drivers) is a common cause of poor scaling, and nccl-tests
+(all_reduce_perf) measures the achieved bus bandwidth. The other options don't diagnose the network.
+"""
+
+[[questions]]
+id = "06-28"
+topic = "GPUDirect RDMA"
+question = "What does GPUDirect RDMA provide in multi-node training?"
+options = [
+  "Faster tensor-core math",
+  "Compression of gradients before sending",
+  "A replacement for NCCL",
+  "Direct data transfer between the network adapter and GPU memory without staging through CPU memory, which lowers latency and CPU overhead for inter-node collectives",
+]
+answer = ["D"]
+explanation = """
+Without GPUDirect RDMA, data goes GPU → host memory → NIC and back on the other side. RDMA lets
+InfiniBand or RoCE NICs read and write GPU memory directly, and NCCL uses it when available. It
+doesn't change compute speed or compress data, and it's a transport NCCL uses, not a replacement for it.
+"""
+
+[[questions]]
+id = "06-29"
+topic = "Topology"
+question = "What does `nvidia-smi topo -m` show, and why does it matter for distributed training?"
+options = [
+  "GPU temperatures over time",
+  "The interconnect between each pair of GPUs (for example NVLink vs PCIe paths through the CPU) and their CPU/NUMA affinity, which decides where bandwidth-hungry groups like TP should go",
+  "The model's layer topology",
+  "Which processes use each GPU",
+]
+answer = ["B"]
+explanation = """
+The matrix shows whether GPU pairs connect through NVLink (NV#) or through PCIe switches or the CPU
+(PIX, PHB, SYS), plus NIC placement. TP and other chatty groups should sit on NVLink-connected
+GPUs. Temperatures come from nvidia-smi/DCGM, and process lists come from plain nvidia-smi.
+"""
+
+[[questions]]
+id = "06-30"
+topic = "NVSwitch"
+question = "In an 8-GPU H100 SXM server, what is the role of NVSwitch?"
+options = [
+  "It connects the server to other servers over InfiniBand",
+  "It switches GPUs between training and inference modes",
+  "It connects every GPU to every other GPU at full NVLink bandwidth, so any-to-any collectives inside the node don't share a slow path",
+  "It replaces PCIe for CPU-to-GPU transfers",
+]
+answer = ["C"]
+explanation = """
+NVSwitch chips form a non-blocking NVLink fabric inside the node, which is why TP of 8 and
+all-to-all within a node perform well. Inter-node links are InfiniBand or Ethernet NICs, there are
+no training/inference modes, and host transfers still use PCIe.
+"""
+
+[[questions]]
+id = "06-31"
+topic = "Amdahl's law"
+question = """
+Profiling shows 10% of each training step is serial work that doesn't speed up with more GPUs.
+What is the maximum possible speed-up from adding GPUs?
+"""
+options = ["10×", "90×", "Unlimited", "About 1.1×"]
+answer = ["A"]
+explanation = """
+Amdahl's law: speed-up = 1 / ((1 − p) + p/N). With p = 0.9 it approaches 1/0.1 = 10× as N grows.
+That's why removing serial bottlenecks (data loading, synchronisation, exposed communication)
+matters more than adding GPUs.
+"""
+
+[[questions]]
+id = "06-32"
+topic = "Weak vs strong scaling"
+question = """
+A team doubles the GPUs from 64 to 128 and keeps the per-GPU micro-batch constant, so the global
+batch doubles. Throughput nearly doubles. What kind of scaling is this?
+"""
+options = [
+  "Strong scaling: the same problem finished twice as fast",
+  "Weak scaling: the problem size grows with the number of GPUs, keeping work per GPU constant",
+  "Pipeline scaling",
+  "Amdahl scaling",
+]
+answer = ["B"]
+explanation = """
+Keeping per-GPU work fixed while the total grows is weak scaling, which is typical for data
+parallelism and why it scales well. Strong scaling keeps the total problem fixed (per-GPU work
+shrinks), and Amdahl's law limits it. Also check that the larger global batch still trains well,
+since it may need learning-rate adjustments.
+"""
+
+[[questions]]
+id = "06-33"
+topic = "Expert parallelism"
+question = """
+In an MoE model trained with expert parallelism, step time is dominated by one GPU while others
+wait, and profiles show long all-to-all phases. What is the likely cause?
+"""
+options = [
+  "The attention layers are too small",
+  "The GPUs use different NCCL versions",
+  "The learning rate is too high",
+  "Router load imbalance: many tokens are routed to experts on one GPU, which becomes a straggler for the all-to-all and the expert computation; load-balancing losses and capacity limits address it",
+]
+answer = ["D"]
+explanation = """
+The all-to-all completes only when every rank has sent and received its tokens, and the busiest
+expert's GPU determines how long the expert computation takes. Balanced routing (auxiliary load-balancing
+loss, capacity factors) evens the load. Attention size and learning rate don't create per-GPU hot spots.
+"""
+
+[[questions]]
+id = "06-34"
+topic = "MFU calculation"
+question = """
+An 8B-parameter model trains at 600,000 tokens/s on 64 H100 GPUs (peak about 989 dense BF16
+TFLOPS each). What is the approximate model FLOPs utilisation (MFU)?
+"""
+options = ["About 15%", "About 23%", "About 45%", "About 90%"]
+answer = ["C"]
+explanation = """
+Training costs about 6 FLOPs per parameter per token: 6 × 8e9 × 6e5 = 2.88e16 FLOP/s achieved.
+Peak = 64 × 989e12 ≈ 6.33e16 FLOP/s. MFU ≈ 2.88 / 6.33 ≈ 45%, a good value for large-scale
+training. About 15% comes from using 2 FLOPs per parameter per token (forward only), and
+about 23% from halving the result by mistake.
+"""
+
+[[questions]]
+id = "06-35"
+topic = "Roofline"
+question = "Why is autoregressive decoding at batch size 1 almost always memory-bound on modern GPUs?"
+options = [
+  "Each step is essentially a matrix–vector product: about 2 FLOPs per weight read, which is far below the GPU's FLOPs-per-byte ridge point",
+  "Decoding uses FP32",
+  "Attention is disabled during decoding",
+  "Tensor cores don't support decoding",
+]
+answer = ["A"]
+explanation = """
+A GEMV reads each weight once and does one multiply-add with it, so its arithmetic intensity is
+about 1 FLOP/byte in bf16, while an H100 needs about 295 FLOP/byte to be compute-bound. Batching raises
+intensity. Precision, attention and tensor-core support aren't the reason.
+"""
+
+[[questions]]
+id = "06-36"
+topic = "NCCL timeouts"
+question = """
+A 32-GPU job hangs and then fails with an NCCL watchdog timeout on most ranks. Which is the most
+likely root cause to investigate first?
+"""
+options = [
+  "The model is too small",
+  "One rank stopped participating in collectives (for example it crashed, ran out of memory, or took a different code path, such as a different number of batches), so all others wait for it",
+  "NCCL doesn't support 32 GPUs",
+  "The learning rate schedule ended",
+]
+answer = ["B"]
+explanation = """
+Collectives need every rank. If one process dies, hangs in data loading, or skips a collective
+(uneven data, a conditional code path), the rest block until the timeout. Check the first failing
+rank's logs, memory and data sharding. Model size, NCCL scale limits and LR schedules don't cause hangs.
+"""
+
+[[questions]]
+id = "06-37"
+topic = "DistributedSampler"
+question = """
+With DDP and a DistributedSampler (shuffle=True), each epoch presents the same data order. What
+was forgotten?
+"""
+options = [
+  "Setting the NCCL backend",
+  "Calling torch.cuda.set_device",
+  "Calling sampler.set_epoch(epoch) at the start of each epoch, so the shuffle seed changes per epoch while staying consistent across ranks",
+  "Wrapping the model in DDP",
+]
+answer = ["C"]
+explanation = """
+DistributedSampler shuffles deterministically from a seed plus the epoch number, so ranks agree on
+the permutation. Without set_epoch the epoch stays at 0 and the order repeats. The backend, device
+binding and DDP wrapping don't affect data order.
+"""
+
+[[questions]]
+id = "06-38"
+topic = "Context parallelism"
+question = "How does context parallelism (ring attention) compute attention for a sequence split across GPUs?"
+options = [
+  "Each GPU computes attention only within its own block of tokens, ignoring the rest",
+  "The full sequence is gathered on one GPU for attention",
+  "Attention is approximated with a low-rank projection",
+  "Each GPU keeps its block of queries while key/value blocks are passed around a ring; partial results are merged with an online softmax, giving exact attention",
+]
+answer = ["D"]
+explanation = """
+Every query eventually meets every key/value block, and the running max and sum make the merged
+result identical to full attention. No GPU holds the whole sequence's K/V, and communication
+overlaps with computation. Local-only attention changes the model, gathering everything defeats the
+purpose, and low-rank projections are approximations.
+"""

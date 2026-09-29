@@ -79,3 +79,53 @@ def test_8_roofline(lab):
     assert prefill > 1000
     assert lab.is_memory_bound(decode, h100_peak, h100_bw)
     assert not lab.is_memory_bound(prefill, h100_peak, h100_bw)
+
+
+def test_9_collectives(lab):
+    g = [np.array([1.0, 2, 3, 4]), np.array([10.0, 20, 30, 40])]
+    for out in lab.all_reduce(g):
+        np.testing.assert_array_equal(out, [11, 22, 33, 44])
+    rs = lab.reduce_scatter(g)
+    np.testing.assert_array_equal(rs[0], [11, 22])
+    np.testing.assert_array_equal(rs[1], [33, 44])
+    # The ring all-reduce IS reduce-scatter followed by all-gather:
+    for out in lab.all_gather(rs):
+        np.testing.assert_array_equal(out, [11, 22, 33, 44])
+    send = [[np.array([0]), np.array([1]), np.array([2])],
+            [np.array([10]), np.array([11]), np.array([12])],
+            [np.array([20]), np.array([21]), np.array([22])]]
+    recv = lab.all_to_all(send)
+    assert [int(a[0]) for a in recv[2]] == [2, 12, 22], "rank 2 gets what every rank addressed to it"
+
+
+def test_10_ring_attention(lab):
+    rng = np.random.default_rng(0)
+    q, k, v = rng.normal(size=(4, 8)), rng.normal(size=(12, 8)), rng.normal(size=(12, 8))
+    scores = q @ k.T / np.sqrt(8)
+    w = np.exp(scores - scores.max(1, keepdims=True))
+    ref = (w / w.sum(1, keepdims=True)) @ v
+    shards = [(k[i : i + 4], v[i : i + 4]) for i in (0, 4, 8)]
+    np.testing.assert_allclose(lab.ring_attention_rank(q, shards), ref, atol=1e-12)
+    np.testing.assert_allclose(lab.ring_attention_rank(q, shards[::-1]), ref, atol=1e-12)  # arrival order doesn't matter
+
+
+def test_11_gradient_buckets(lab):
+    mb = 2**20
+    sizes = [10 * mb, 30 * mb, 5 * mb, 5 * mb, 20 * mb, 8 * mb]
+    assert lab.gradient_buckets(sizes, 25 * mb) == [[5], [4, 3], [2], [1], [0]]
+    assert lab.gradient_buckets([mb] * 4, 100 * mb) == [[3, 2, 1, 0]], "last layer's gradient first"
+
+
+def test_12_timeline(lab):
+    events = [(0, 10, "compute"), (8, 12, "nccl"), (12, 20, "compute"), (20, 26, "nccl"), (28, 30, "compute")]
+    stats = lab.timeline_stats(events)
+    assert stats["gpu_busy"] == pytest.approx(28 / 30), "idle 26-28"
+    assert stats["compute"] == pytest.approx(20 / 30)
+    assert stats["exposed_comm"] == pytest.approx(8 / 30), "10-12 and 20-26; 8-10 was hidden behind compute"
+
+
+def test_13_scaling(lab):
+    assert lab.scaling_efficiency(1000, 6200, 8) == pytest.approx(0.775)
+    assert lab.amdahl_speedup(0.95, 8) == pytest.approx(5.93, abs=0.01)
+    assert lab.amdahl_speedup(0.95, 1024) < 20, "a 5% serial part caps the speed-up at 20×"
+    assert lab.amdahl_speedup(1.0, 64) == pytest.approx(64)

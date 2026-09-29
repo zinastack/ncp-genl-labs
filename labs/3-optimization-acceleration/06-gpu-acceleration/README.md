@@ -109,3 +109,10 @@ Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through ever
 | 6 | `average_gradients` | DDP all-reduce with `torch.distributed` (run under torchrun) |
 | 7 | `training_flops`, `mfu` | 6·N·D and utilisation |
 | 8 | `gemm_arithmetic_intensity`, `is_memory_bound` | roofline analysis |
+| 9 | `all_reduce`, `reduce_scatter`, `all_gather`, `all_to_all` | the NCCL collectives behind DDP, FSDP, TP and MoE |
+| 10 | `ring_attention_rank` | context parallelism: exact attention with K/V passed around a ring |
+| 11 | `gradient_buckets` | how DDP overlaps gradient all-reduce with backward |
+| 12 | `timeline_stats` | reading a profile: GPU busy time and exposed communication |
+| 13 | `scaling_efficiency`, `amdahl_speedup` | scaling efficiency and Amdahl's limit |
+
+Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`](SOLUTION.md).
