@@ -10,11 +10,12 @@ Launchables but can't create them.
 |---|---|
 | **Code** | Git repository → `https://github.com/zinastack/ncp-genl-labs` |
 | **Runtime** | **VM Mode** |
-| **Setup script** | paste [`brev/launchable-setup.sh`](launchable-setup.sh) (a short bootstrap that runs `brev/setup.sh` from the repo) |
+| **Setup script** | paste [`brev/launchable-setup.sh`](launchable-setup.sh) (a short bootstrap that runs `brev/setup.sh` from the repo). The console requires the first line to be exactly `#!/bin/bash` |
 | **Launch parameter** | `LAB_SECTION` = the section number below |
 | **Optional parameter** | `HF_TOKEN`: left empty; each deployer can add their own (all lab models are public) |
 | **Jupyter** | enabled |
 | **Disk** | 100 GiB |
+| **Overview page** | Brev renders the repo's root `README.md` (the *Launched from Brev? Start here* section), so keep that section current |
 | **Visibility** | **Only my organization** while you test; switch to *Anyone with the link* or *Everyone (published)* when you open them. New Launchables default to *Anyone with the link*, so change it at creation. |
 
 ## The five Launchables

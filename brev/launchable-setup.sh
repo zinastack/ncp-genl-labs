@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Paste this into the "Setup script" field of each NCP-GENL Labs Launchable.
 # It only bootstraps: the real setup lives in the repo (brev/setup.sh), so fixes there apply to
 # every Launchable without editing them. LAB_SECTION (1–5 or all) comes from the launch parameter.

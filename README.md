@@ -12,6 +12,35 @@ Every lab combines three things:
 Each lab also has a **GPU part** (`gpu_lab.py` plus section `make` targets) that runs your code on
 real models on a cheap cloud GPU (L4/T4 via Brev or AWS). See [brev/README.md](brev/README.md).
 
+## Launched from Brev? Start here
+
+Each section has its own Brev Launchable with a cheap GPU (1× L4 or T4; 2× L4 for Section 3).
+The setup script has already cloned this repo to `/home/ubuntu/ncp-genl-labs`, created `.venv`,
+installed the section's GPU packages and generated a Jupyter notebook next to every `gpu_lab.py`.
+Setup takes a few minutes after the instance starts.
+
+Open **Jupyter** (or a terminal) from the instance page, then:
+
+```bash
+cd ~/ncp-genl-labs
+make doctor             # GPU, driver, PyTorch, Docker
+make s1                 # list the section's targets (s1…s5)
+make test-01            # your exercises vs the tests (CPU is fine)
+make gpu-01             # the lab's GPU part; or open labs/…/01-llm-architecture/gpu_lab.ipynb
+make quiz-01            # exam-style questions for the lab
+```
+
+| Launchable | Labs | GPU | Extra links |
+|---|---|---|---|
+| S1 Foundations & Prompting | 01, 02 | 1× L4 | |
+| S2 Data & Fine-Tuning | 03, 04 | 1× L4 | |
+| S3 Optimization & Acceleration | 05, 06 | 2× L4 | |
+| S4 Deployment & Monitoring | 07, 08 | 1× T4 | `grafana` (3000), `prometheus` (9090) |
+| S5 Evaluation & Responsible AI | 09, 10 | 1× L4 | |
+
+All models are public. You can optionally set `HF_TOKEN` when you deploy for faster Hugging Face downloads.
+**Stop the instance when you're done** because billing is per hour.
+
 ## Sections and blueprint coverage
 
 | Section | Lab | Blueprint domain | Weight | GPU part |
