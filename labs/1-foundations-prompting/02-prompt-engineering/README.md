@@ -102,3 +102,19 @@ Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through ever
 | 12 | `frequency_presence_penalty` | OpenAI-style frequency and presence penalties |
 
 Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`](SOLUTION.md).
+
+## Further reading
+
+Chosen to explain the concepts behind this lab; read the *Start here* items first.
+
+**Start here**
+- [Prompt Engineering](https://lilianweng.github.io/posts/2023-03-15-prompt-engineering/) (Lilian Weng): zero/few-shot, example selection and ordering, CoT, self-consistency. It covers the same ground as §1 of this lab.
+- [Prompt Engineering Guide](https://www.promptingguide.ai/) (DAIR.AI): one short page per technique, with examples.
+- [How to generate text](https://huggingface.co/blog/how-to-generate) (Hugging Face): greedy, beam, temperature, top-k and top-p, with plots. It matches the sampler you write.
+
+**Go deeper**
+- [LLM Powered Autonomous Agents](https://lilianweng.github.io/posts/2023-06-23-agent/) (Lilian Weng): planning, ReAct, tool use and memory.
+- [Outlines](https://github.com/dottxt-ai/outlines): structured generation by masking logits, which is the idea behind your constrained decoder and NIM/vLLM guided decoding.
+
+**Papers**
+- [Chain-of-Thought](https://arxiv.org/abs/2201.11903) · [Self-Consistency](https://arxiv.org/abs/2203.11171) · [ReAct](https://arxiv.org/abs/2210.03629) · [RAG](https://arxiv.org/abs/2005.11401) · [Prompt Tuning](https://arxiv.org/abs/2104.08691)

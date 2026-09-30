@@ -139,3 +139,22 @@ Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through ever
 | 15 | `float_format` | FP32 / BF16 / FP16 / FP8: range vs precision |
 
 Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`](SOLUTION.md).
+
+## Further reading
+
+Chosen to explain the concepts behind this lab; read the *Start here* items first.
+
+**Start here**
+- [Large Transformer Model Inference Optimization](https://lilianweng.github.io/posts/2023-01-10-inference-optimization/) (Lilian Weng): quantization, pruning, distillation and efficient attention in one survey.
+- [Mastering LLM Techniques: Inference Optimization](https://developer.nvidia.com/blog/mastering-llm-techniques-inference-optimization/) (NVIDIA): prefill vs decode, KV cache, batching, parallelism and speculative decoding, in NVIDIA's vocabulary.
+- [A Visual Guide to Quantization](https://newsletter.maartengrootendorst.com/p/a-visual-guide-to-quantization) (Maarten Grootendorst): absmax vs zero-point, outliers, GPTQ, NF4 and FP8, all drawn.
+
+**Go deeper**
+- [Transformer Inference Arithmetic](https://kipp.ly/p/transformer-inference-arithmetic) (kipply): the KV cache, FLOPs and memory-bandwidth math behind §1 and §4, with worked numbers.
+- [Making Deep Learning Go Brrrr From First Principles](https://horace.io/brrr_intro.html) (Horace He): compute-bound vs memory-bound vs overhead-bound, which is the roofline intuition.
+- [LLM.int8() and Emergent Features](https://timdettmers.com/2022/08/17/llm-int8-and-emergent-features/) (Tim Dettmers): why outlier features break naive INT8.
+- [vLLM: PagedAttention](https://vllm.ai/blog/2023-06-20-vllm) (vLLM blog): KV-cache fragmentation and paging.
+- [How to Scale Your Model](https://jax-ml.github.io/scaling-book/) (Google DeepMind, free book): rooflines and memory math for training and inference.
+
+**Papers**
+- [PagedAttention](https://arxiv.org/abs/2309.06180) · [Speculative Decoding](https://arxiv.org/abs/2211.17192) · [SmoothQuant](https://arxiv.org/abs/2211.10438) · [QLoRA (NF4)](https://arxiv.org/abs/2305.14314)

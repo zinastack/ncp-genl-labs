@@ -115,3 +115,22 @@ Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`
 
 GPU part (`gpu_lab.py`): BERT pooling on a real model, GPT-2's real parameter count vs yours, a measured
 GQA KV cache vs your formula, and math vs memory-efficient vs FlashAttention kernels.
+
+## Further reading
+
+Chosen to explain the concepts behind this lab; read the *Start here* items first.
+
+**Start here**
+- [The Illustrated Transformer](https://jalammar.github.io/illustrated-transformer/) (Jay Alammar): Q/K/V, multi-head attention and the encoder–decoder, drawn step by step. Then [The Illustrated GPT-2](https://jalammar.github.io/illustrated-gpt2/) for the decoder-only case and causal masking.
+- [Attention in transformers, visually explained](https://www.3blue1brown.com/lessons/attention/) (3Blue1Brown): the intuition behind the scores → softmax → weighted sum you implement.
+- [Let's build GPT: from scratch, in code](https://www.youtube.com/watch?v=kCc8FmEb1nY) (Andrej Karpathy, video): a decoder-only model written live, very close to this lab's exercises.
+
+**Go deeper**
+- [The Annotated Transformer](https://nlp.seas.harvard.edu/annotated-transformer/) (Harvard NLP): the original paper, line by line, in PyTorch.
+- [The Transformer Family v2](https://lilianweng.github.io/posts/2023-01-27-the-transformer-family-v2/) (Lilian Weng): a survey of positional encodings, efficient attention and MoE.
+- [Rotary Embeddings: A Relative Revolution](https://blog.eleuther.ai/rotary-embeddings/) (EleutherAI): why RoPE encodes *relative* position and extrapolates better.
+- [Mixture of Experts Explained](https://huggingface.co/blog/moe) (Hugging Face): routing, top-k gating, load balancing, and why total ≠ active parameters.
+- [Build a Large Language Model (From Scratch)](https://www.manning.com/books/build-a-large-language-model-from-scratch) (Sebastian Raschka, book).
+
+**Papers**
+- [Attention Is All You Need](https://arxiv.org/abs/1706.03762) · [RoFormer (RoPE)](https://arxiv.org/abs/2104.09864) · [GQA](https://arxiv.org/abs/2305.13245) · [FlashAttention](https://arxiv.org/abs/2205.14135) / [FlashAttention-2](https://arxiv.org/abs/2307.08691) · [Mixtral of Experts](https://arxiv.org/abs/2401.04088)

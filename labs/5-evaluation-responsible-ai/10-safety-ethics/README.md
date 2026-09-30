@@ -104,3 +104,23 @@ Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through ever
 | 11 | `ai_act_risk_tier` | EU AI Act risk tiers and what each implies |
 
 Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`](SOLUTION.md).
+
+## Further reading
+
+Chosen to explain the concepts behind this lab; read the *Start here* items first.
+
+**Start here**
+- [OWASP Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/): prompt injection, sensitive-information disclosure, excessive agency and the rest of the list.
+- [Adversarial Attacks on LLMs](https://lilianweng.github.io/posts/2023-10-25-adv-attack-llm/) (Lilian Weng): jailbreaks, token-level attacks and red-teaming.
+- [Prompt injection series](https://simonwillison.net/series/prompt-injection/) (Simon Willison): why direct and indirect (retrieved) injection is so hard to fix.
+
+**Go deeper**
+- [Fairness and Machine Learning](https://fairmlbook.org/) (Barocas, Hardt, Narayanan; free book): demographic parity, equalized odds, and why you can't satisfy them all.
+- [EU AI Act explorer](https://artificialintelligenceact.eu/): the risk tiers and the obligations for each.
+- [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework): Govern, Map, Measure and Manage.
+
+**NVIDIA docs**
+- [NeMo Guardrails](https://docs.nvidia.com/nemo/guardrails/about-nemo-guardrails-library/overview): input, output, retrieval, dialog and topical rails, configured with Colang.
+
+**Papers**
+- [Model Cards for Model Reporting](https://arxiv.org/abs/1810.03993) · [Extracting Training Data from LLMs](https://arxiv.org/abs/2012.07805)

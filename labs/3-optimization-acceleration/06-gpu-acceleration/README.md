@@ -116,3 +116,24 @@ Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through ever
 | 13 | `scaling_efficiency`, `amdahl_speedup` | scaling efficiency and Amdahl's limit |
 
 Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`](SOLUTION.md).
+
+## Further reading
+
+Chosen to explain the concepts behind this lab; read the *Start here* items first.
+
+**Start here**
+- [The Ultra-Scale Playbook](https://huggingface.co/spaces/nanotron/ultrascale-playbook) (Hugging Face): the best single resource for this lab. It covers DP → ZeRO-1/2/3 → TP → PP → CP → EP, with memory and communication math and interactive plots.
+- [How to Train Really Large Models on Many GPUs?](https://lilianweng.github.io/posts/2021-09-25-train-large/) (Lilian Weng): a shorter overview of the parallelism strategies.
+
+**Go deeper**
+- [Machine Learning Engineering](https://github.com/stas00/ml-engineering) (Stas Bekman, free book): hands-on notes on networking, NCCL debugging, storage and training at scale.
+- [How to Scale Your Model](https://jax-ml.github.io/scaling-book/) (Google DeepMind, free book): collectives cost, sharding and rooflines.
+- [Triton tutorials](https://triton-lang.org/main/getting-started/tutorials/index.html): vector add → fused softmax → matmul, which is the kernel-writing side of the lab.
+
+**PyTorch and NVIDIA docs**
+- [Getting started with DDP](https://docs.pytorch.org/tutorials/intermediate/ddp_tutorial.html) · [Getting started with FSDP](https://docs.pytorch.org/tutorials/intermediate/FSDP_tutorial.html)
+- [NCCL collective operations](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html): all-reduce, all-gather, reduce-scatter and broadcast, with diagrams.
+- [Nsight Systems user guide](https://docs.nvidia.com/nsight-systems/UserGuide/index.html)
+
+**Papers**
+- [ZeRO](https://arxiv.org/abs/1910.02054) · [Megatron-LM (tensor parallelism)](https://arxiv.org/abs/1909.08053)

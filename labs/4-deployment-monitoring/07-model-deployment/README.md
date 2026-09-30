@@ -109,3 +109,16 @@ Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`
 
 GPU part: `triton/model_repository/text_classifier` (Python backend, HF DistilBERT on GPU),
 `client.py`, `docker-compose.yml`, and `k8s/` manifests.
+
+## Further reading
+
+Chosen to explain the concepts behind this lab; read the *Start here* items first.
+
+**Start here**
+- [How continuous batching enables 23x throughput in LLM inference](https://www.anyscale.com/blog/continuous-batching-llm-inference) (Anyscale): static vs dynamic vs in-flight (continuous) batching, and why it matters for LLMs.
+- [Mastering LLM Techniques: Inference Optimization](https://developer.nvidia.com/blog/mastering-llm-techniques-inference-optimization/) (NVIDIA): where Triton, TensorRT-LLM and batching fit together.
+
+**NVIDIA docs**
+- Triton: [model configuration](https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/user_guide/model_configuration.html) (instance groups, max_batch_size, ensembles) and [batchers](https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/user_guide/batcher.html) (dynamic batching, preferred sizes, queue delay).
+- [NIM for LLMs](https://docs.nvidia.com/nim/large-language-models/latest/introduction.html): the OpenAI-compatible container, profiles and deployment.
+- [TensorRT-LLM](https://nvidia.github.io/TensorRT-LLM/): engine build, in-flight batching, paged KV cache and quantization.

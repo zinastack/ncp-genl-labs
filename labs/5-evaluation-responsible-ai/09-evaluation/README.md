@@ -90,3 +90,20 @@ Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through ever
 | 13 | `regression_gate` | continuous evaluation: blocking releases on metric regressions |
 
 Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`](SOLUTION.md).
+
+## Further reading
+
+Chosen to explain the concepts behind this lab; read the *Start here* items first.
+
+**Start here**
+- [Evaluating the Effectiveness of LLM-Evaluators](https://eugeneyan.com/writing/llm-evaluators/) (Eugene Yan): LLM-as-judge biases (position, verbosity, self-preference) and how to measure agreement.
+- [The LLM Evaluation Guidebook](https://github.com/huggingface/evaluation-guidebook) (Hugging Face): automatic benchmarks, human evaluation, judges and common pitfalls.
+- [Perplexity of fixed-length models](https://huggingface.co/docs/transformers/perplexity) (Hugging Face): the sliding-window perplexity you compute on the GPU.
+
+**Go deeper**
+- [Patterns for Building LLM-based Systems](https://eugeneyan.com/writing/llm-patterns/) (Eugene Yan): evals, RAG, guardrails and feedback loops in production.
+- [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness): the harness behind most leaderboards.
+- [HELM](https://crfm.stanford.edu/helm/) (Stanford CRFM): holistic, multi-metric evaluation.
+
+**Papers**
+- [Judging LLM-as-a-Judge (MT-Bench)](https://arxiv.org/abs/2306.05685) · [RAGAS](https://arxiv.org/abs/2309.15217) · [Adding Error Bars to Evals](https://arxiv.org/abs/2411.00640)

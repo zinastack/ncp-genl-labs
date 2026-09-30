@@ -117,6 +117,17 @@ labs/<N>-<section>/
     gpu_lab.py           GPU part (# %% cells: run as a script, in VS Code, or as a generated notebook)
 ```
 
+## Study resources
+
+Every lab README ends with a **Further reading** list for its domain. These resources cover several domains:
+
+- [NCP-GENL exam page and blueprint](https://www.nvidia.com/en-us/learn/certification/generative-ai-llm-professional/) (NVIDIA)
+- [The Ultra-Scale Playbook](https://huggingface.co/spaces/nanotron/ultrascale-playbook) (Hugging Face): training at scale (Labs 05, 06)
+- [How to Scale Your Model](https://jax-ml.github.io/scaling-book/) (Google DeepMind): memory, FLOPs and rooflines (Labs 05, 06)
+- [Machine Learning Engineering](https://github.com/stas00/ml-engineering) (Stas Bekman): GPUs, networking and debugging (Labs 06, 08)
+- [Lilian Weng's blog](https://lilianweng.github.io/): long surveys on transformers, prompting, inference optimization and adversarial attacks
+- [Build a Large Language Model (From Scratch)](https://www.manning.com/books/build-a-large-language-model-from-scratch) (Sebastian Raschka, book)
+
 ## Exam facts
 
 60–70 questions · 120 minutes · $200 · valid 2 years · recommended experience: 2–3 years with

@@ -101,3 +101,19 @@ Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through ever
 | 13 | `lr_at_step` | warm-up + cosine learning-rate schedule |
 
 Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`](SOLUTION.md).
+
+## Further reading
+
+Chosen to explain the concepts behind this lab; read the *Start here* items first.
+
+**Start here**
+- [Practical Tips for Finetuning LLMs Using LoRA](https://magazine.sebastianraschka.com/p/practical-tips-for-finetuning-llms) (Sebastian Raschka): rank, alpha, which layers to target and memory, backed by hundreds of experiments.
+- [Making LLMs even more accessible with bitsandbytes, 4-bit and QLoRA](https://huggingface.co/blog/4bit-transformers-bitsandbytes) (Hugging Face): NF4, double quantization and paged optimizers.
+- [Illustrating RLHF](https://huggingface.co/blog/rlhf) (Hugging Face): SFT → reward model → PPO, the pipeline DPO simplifies.
+
+**Go deeper**
+- [RLHF: Reinforcement Learning from Human Feedback](https://huyenchip.com/2023/05/02/rlhf.html) (Chip Huyen): why each alignment stage exists.
+- [PEFT documentation](https://huggingface.co/docs/peft/index): LoRA, prompt tuning, IA3 and the other adapters as library configs.
+
+**Papers**
+- [LoRA](https://arxiv.org/abs/2106.09685) · [QLoRA](https://arxiv.org/abs/2305.14314) · [DPO](https://arxiv.org/abs/2305.18290) · [Prompt Tuning](https://arxiv.org/abs/2104.08691)

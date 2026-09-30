@@ -106,3 +106,18 @@ Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through ever
 | 14 | `blend_plan` | data blending: mixture weights, upsampling, epochs per source |
 
 Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`](SOLUTION.md).
+
+## Further reading
+
+Chosen to explain the concepts behind this lab; read the *Start here* items first.
+
+**Start here**
+- [FineWeb: decanting the web for the finest text data](https://huggingface.co/spaces/HuggingFaceFW/blogpost-fineweb-v1) (Hugging Face): a real curation pipeline end to end, covering extraction, quality filters, MinHash dedup and ablations to prove each step helps.
+- [Let's build the GPT Tokenizer](https://www.youtube.com/watch?v=zduSFxRajkE) (Andrej Karpathy, video): BPE from scratch, and why tokenization causes so many LLM quirks.
+- [Hugging Face LLM Course, chapter 6: tokenizers](https://huggingface.co/learn/llm-course/chapter6/1): BPE vs WordPiece vs Unigram, normalisation and pre-tokenisation.
+
+**NVIDIA docs**
+- [NeMo Curator](https://docs.nvidia.com/nemo/curator/home/welcome): the GPU pipeline this lab imitates (exact, fuzzy and semantic dedup, classifiers, PII redaction).
+
+**Papers**
+- [Deduplicating Training Data Makes Language Models Better](https://arxiv.org/abs/2107.06499) · [SemDeDup](https://arxiv.org/abs/2303.09540)

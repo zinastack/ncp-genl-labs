@@ -109,3 +109,20 @@ Stuck, or done with an exercise? [`SOLUTION.md`](SOLUTION.md) walks through ever
 | 13 | `gpu_node_action` | acting on DCGM health signals (XID, ECC, temperature) |
 
 Every quiz topic maps to an exercise: see the table at the end of [`SOLUTION.md`](SOLUTION.md).
+
+## Further reading
+
+Chosen to explain the concepts behind this lab; read the *Start here* items first.
+
+**Start here**
+- [Monitoring Distributed Systems](https://sre.google/sre-book/monitoring-distributed-systems/) (Google SRE book): the four golden signals, and why you alert on symptoms rather than causes.
+- [Alerting on SLOs](https://sre.google/workbook/alerting-on-slos/) (Google SRE workbook): error budgets and multi-window burn-rate alerts.
+- [Data Distribution Shifts and Monitoring](https://huyenchip.com/2022/02/07/data-distribution-shifts-and-monitoring.html) (Chip Huyen): covariate, label and concept drift, and how to detect each.
+
+**Go deeper**
+- [Histograms and summaries](https://prometheus.io/docs/practices/histograms/) (Prometheus): why P95 comes from `histogram_quantile` over buckets.
+- [Circuit Breaker](https://martinfowler.com/bliki/CircuitBreaker.html) (Martin Fowler): the closed → open → half-open pattern.
+
+**NVIDIA docs**
+- [Triton metrics](https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/user_guide/metrics.html): queue time vs compute time, and what each counter means.
+- [DCGM exporter](https://github.com/NVIDIA/dcgm-exporter): GPU utilisation, memory, temperature, XID and ECC metrics for Prometheus.
