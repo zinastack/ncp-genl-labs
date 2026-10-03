@@ -1,0 +1,24 @@
+# prometheus-adapter: exposes PromQL results through the Kubernetes custom-metrics API, which is
+# what an HPA of type "Pods" reads. Each rule = one per-pod metric.
+prometheus:
+  url: http://prometheus-server.monitoring.svc
+  port: 80
+rules:
+  default: false
+  custom:
+    - seriesQuery: 'nv_inference_queue_duration_us{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: namespace}
+          pod: {resource: pod}
+      name: {as: triton_avg_queue_us}
+      metricsQuery: >-
+        sum(rate(nv_inference_queue_duration_us{<<.LabelMatchers>>}[1m])) by (<<.GroupBy>>)
+        / clamp_min(sum(rate(nv_inference_request_success{<<.LabelMatchers>>}[1m])) by (<<.GroupBy>>), 0.001)
+    - seriesQuery: 'nv_inference_pending_request_count{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: namespace}
+          pod: {resource: pod}
+      name: {as: triton_pending_requests}
+      metricsQuery: 'sum(nv_inference_pending_request_count{<<.LabelMatchers>>}) by (<<.GroupBy>>)'

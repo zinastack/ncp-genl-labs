@@ -1,0 +1,11 @@
+# Minimal in-cluster Prometheus (helm chart prometheus-community/prometheus) for the HPA and canary
+# tasks. Its default "kubernetes-pods" job scrapes every pod annotated prometheus.io/scrape=true and
+# copies pod labels (app, version) and namespace/pod onto the series.
+alertmanager: {enabled: false}
+prometheus-pushgateway: {enabled: false}
+prometheus-node-exporter: {enabled: false}
+kube-state-metrics: {enabled: false}
+server:
+  global: {scrape_interval: 5s, evaluation_interval: 5s}
+  persistentVolume: {enabled: false}
+  service: {type: NodePort, nodePort: 30900}   # http://localhost:30900 on the instance

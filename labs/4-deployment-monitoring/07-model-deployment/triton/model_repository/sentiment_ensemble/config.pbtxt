@@ -1,0 +1,38 @@
+# Task 5: text in, label out, three models chained INSIDE Triton. Tensors move between steps in
+# memory: no extra network hops and no tokenizer in the client. Keys are each model's own tensor
+# names; values are the ensemble's internal tensor names that connect the steps.
+name: "sentiment_ensemble"
+platform: "ensemble"
+max_batch_size: 16
+
+input [ { name: "TEXT" data_type: TYPE_STRING dims: [ 1 ] } ]
+output [
+  { name: "LABEL" data_type: TYPE_STRING dims: [ 1 ] },
+  { name: "SCORE" data_type: TYPE_FP32 dims: [ 1 ] }
+]
+
+ensemble_scheduling {
+  step [
+    {
+      model_name: "tokenizer"
+      model_version: -1
+      input_map { key: "TEXT" value: "TEXT" }
+      output_map { key: "input_ids" value: "ids" }
+      output_map { key: "attention_mask" value: "mask" }
+    },
+    {
+      model_name: "distilbert_trt"
+      model_version: -1
+      input_map { key: "input_ids" value: "ids" }
+      input_map { key: "attention_mask" value: "mask" }
+      output_map { key: "logits" value: "logits" }
+    },
+    {
+      model_name: "postprocess"
+      model_version: -1
+      input_map { key: "logits" value: "logits" }
+      output_map { key: "LABEL" value: "LABEL" }
+      output_map { key: "SCORE" value: "SCORE" }
+    }
+  ]
+}

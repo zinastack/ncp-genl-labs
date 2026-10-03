@@ -11,7 +11,7 @@ A100/H100s: every GPU lab is sized for a **24 GB L4** or a **16 GB T4**.
 | **1** Foundations & Prompting | 01, 02 | 1× **L4** 24 GB | 1× T4 16 GB | FlashAttention needs sm_80+ (L4 has it, T4 shows "unsupported"), bf16 |
 | **2** Data & Fine-Tuning | 03, 04 | 1× **L4** 24 GB | 1× T4 16 GB | full FT vs LoRA vs QLoRA memory comparison of a 0.5B model |
 | **3** Optimization & Acceleration | 05, 06 | **2× L4** (or 2× T4) | 1× L4 for Lab 05 only | Lab 06 needs ≥ 2 GPUs for real NCCL, DDP scaling and FSDP sharding |
-| **4** Deployment & Monitoring | 07, 08 | 1× **T4** 16 GB | 1× T4 | Triton + DCGM + Prometheus + Grafana in Docker, with a small model |
+| **4** Deployment & Monitoring | 07, 08 | 1× **L4** 24 GB, **200 GB disk** | 1× T4 (no TensorRT-LLM FP8, most NIMs won't fit) | Triton, TensorRT, TensorRT-LLM, NIM, k3s Kubernetes, Prometheus + Grafana + DCGM: ~150 GB of container images |
 | **5** Evaluation & Responsible AI | 09, 10 | 1× **L4** 24 GB | 1× T4 16 GB | vLLM server + evaluation models + guardrails together |
 
 Rough cost: T4 instances are typically **$0.35–0.60/h** and L4 **$0.70–1.00/h** (2× L4 ≈ 2×), so a
@@ -41,7 +41,7 @@ make brev-stop S=3               # stop billing for compute (disk kept); make br
 ```
 
 Defaults per section (cheapest first, falling back to the next type if one isn't available):
-1× L4 for Sections 1, 2 and 5, 2× L4 then 2× T4 for Section 3, 1× T4 for Section 4. Override with
+1× L4 for Sections 1, 2, 4 and 5 (Section 4 prefers 8 vCPUs), 2× L4 then 2× T4 for Section 3. Override with
 `TYPE=<brev type>` (see `brev search gpu`) or `INSTANCE=<name>`. `brev create` doesn't take a disk
 size. If a type's default disk turns out too small for models and Docker images, pick a type with a
 larger disk (`brev search gpu --min-disk 100`).
@@ -82,11 +82,12 @@ Port forwarding without secure links: `brev port-forward <instance> -p 3000:3000
 | Section | Instance | GPU | Approx. on-demand (us-east-1) |
 |---|---|---|---|
 | 1, 2, 5 | `g6.xlarge` | 1× L4 24 GB | ~$0.80/h |
-| 1, 2, 4, 5 (budget) | `g4dn.xlarge` | 1× T4 16 GB | ~$0.53/h |
+| 4 | `g6.2xlarge` | 1× L4 24 GB, 8 vCPUs (200 GB gp3) | ~$0.98/h |
+| 1, 2, 5 (budget) | `g4dn.xlarge` | 1× T4 16 GB | ~$0.53/h |
 | 3 | `g6.12xlarge` / `g4dn.12xlarge` | 4× L4 / 4× T4 | ~$4.60 / ~$3.90 per h |
 
 1. AMI: **Deep Learning Base OSS Nvidia Driver GPU AMI (Ubuntu 22.04)** (driver, Docker and the NVIDIA Container Toolkit preinstalled).
-2. 100 GB gp3 root volume. Security group: SSH (22) from your IP only.
+2. 100 GB gp3 root volume (200 GB for Section 4). Security group: SSH (22) from your IP only.
 3. `ssh ubuntu@<ip>`, then `git clone https://github.com/zinastack/ncp-genl-labs.git && cd ncp-genl-labs && LAB_SECTION=3 bash brev/setup.sh`.
 4. Reach Grafana and Prometheus through an SSH tunnel: `ssh -L 3000:localhost:3000 -L 9090:localhost:9090 ubuntu@<ip>`.
 5. **Stop or terminate** the instance afterwards. Spot instances cut the price by about 60–70% for these interruptible labs.

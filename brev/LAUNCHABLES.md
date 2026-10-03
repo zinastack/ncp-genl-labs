@@ -14,7 +14,7 @@ Launchables but can't create them.
 | **Launch parameter** | `LAB_SECTION` = the section number below |
 | **Optional parameter** | `HF_TOKEN`: left empty; each deployer can add their own (all lab models are public) |
 | **Jupyter** | enabled |
-| **Disk** | 100 GiB |
+| **Disk** | 100 GiB (**200 GiB for S4**: Triton, TensorRT, TensorRT-LLM, NIM and SDK images) |
 | **Overview page** | Brev renders the repo's root `README.md` (the *Launched from Brev? Start here* section), so keep that section current |
 | **Visibility** | **Only my organization** while you test; switch to *Anyone with the link* or *Everyone (published)* when you open them. New Launchables default to *Anyone with the link*, so change it at creation. |
 
@@ -25,7 +25,7 @@ Launchables but can't create them.
 | 1 | **NCP-GENL Labs · S1 Foundations & Prompting** | 1× L4 24 GB → 1× T4 | `1` | Jupyter | 0.85 |
 | 2 | **NCP-GENL Labs · S2 Data & Fine-Tuning** | 1× L4 24 GB → 1× T4 | `2` | Jupyter | 0.85 |
 | 3 | **NCP-GENL Labs · S3 Optimization & Acceleration** | **2× L4** → 2× T4 (Lab 06 needs 2 GPUs) | `3` | Jupyter | 2.39 / 0.98 |
-| 4 | **NCP-GENL Labs · S4 Deployment & Monitoring** | 1× T4 16 GB | `4` | Jupyter, `grafana` → 3000, `prometheus` → 9090 | 0.65 |
+| 4 | **NCP-GENL Labs · S4 Deployment & Monitoring** | 1× L4 24 GB, 8 vCPUs | `4` | Jupyter, `grafana` → 3000, `prometheus` → 9090 | 1.02 |
 | 5 | **NCP-GENL Labs · S5 Evaluation & Responsible AI** | 1× L4 24 GB → 1× T4 | `5` | Jupyter | 0.85 |
 
 Prices are Brev's listing at the time of writing (`make brev-plan S=N` shows current options).
@@ -41,9 +41,11 @@ Prices are Brev's listing at the time of writing (`make brev-plan S=N` shows cur
 3. **S3 Optimization & Acceleration**: Memory math, quantization (INT8, NF4, SmoothQuant, FP8),
    paged KV cache, speculative decoding, activation checkpointing; then real multi-GPU NCCL, DDP vs
    FSDP, ring attention and Nsight Systems profiling. 2 GPUs.
-4. **S4 Deployment & Monitoring**: Triton Inference Server (dynamic batching, ensembles,
-   perf_analyzer), NIM-style OpenAI streaming, Kubernetes manifests, and a Prometheus + Grafana + DCGM
-   stack with alerts, drift, canaries and circuit breakers. 1× T4.
+4. **S4 Deployment & Monitoring**: Hands-on serving: tune Triton dynamic batching and instance
+   groups with perf_analyzer, build TensorRT engines, chain an ensemble, run Model Analyzer, tune
+   TensorRT-LLM (batch, KV cache, INT8) and a NIM; then Kubernetes on the same GPU (device plugin,
+   probes, time-slicing, HPA on queue time, rollouts, canary) and Prometheus + Grafana + DCGM alerts,
+   failure drills and drift. 1× L4.
 5. **S5 Evaluation & Responsible AI**: Evaluation metrics, bootstrap CIs, debiased LLM-as-judge,
    lm-evaluation-harness; fairness audits, NeMo Guardrails, retrieval and topic rails, red-teaming and
    EU AI Act basics. 1× L4.

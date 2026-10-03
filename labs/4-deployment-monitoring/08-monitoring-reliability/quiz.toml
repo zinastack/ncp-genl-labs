@@ -463,3 +463,87 @@ A canary is a safety check (latency, errors) on a small slice before full rollou
 randomly assigns users to measure which version performs better on outcomes, which needs sample
 size and duration. Crash checks are canary territory, zero exposure means shadow, and tokenizers are irrelevant.
 """
+
+[[questions]]
+id = "08-25"
+topic = "Alerting on absence"
+question = """
+The alert "average queue time > 10 ms" never fired during a full Triton outage, although every
+request failed. Why, and what should be added?
+"""
+options = [
+  "With the target down there are no new samples, so the expression returns nothing; alert on up == 0 (or absent()) for the job",
+  "Queue time drops to zero during an outage, so the threshold should be lowered to 0 ms",
+  "Prometheus suppresses all alerts when a target is down; nothing can be done",
+  "The for: clause must be removed so the alert fires on the last sample",
+]
+answer = ["A"]
+explanation = """
+When a scrape fails, the target's metrics stop updating and rate-based expressions return no data,
+so threshold alerts on those metrics cannot fire. Prometheus records up = 0 for the failed target;
+alert on that (or on absent() for critical series). Prometheus does not suppress alerts, and removing
+the for: duration does not create missing data.
+"""
+
+[[questions]]
+id = "08-26"
+topic = "Saturation signals"
+question = """
+During a traffic burst, Triton's average queue time rises from 1 ms to 80 ms and pending requests
+climb, while DCGM reports GPU utilisation of about 70%. The model is a Python-backend pipeline that
+tokenizes on the CPU. Which metric should drive autoscaling and the saturation alert?
+"""
+options = [
+  "Queue time or pending requests, because they measure requests waiting regardless of where the bottleneck is",
+  "GPU utilisation, because it is below 100% so the service is not saturated",
+  "Node CPU utilisation averaged over all cores",
+  "The number of model versions loaded",
+]
+answer = ["A"]
+explanation = """
+Queue time and pending requests show that users are waiting, whatever the bottleneck: here part of
+each request is CPU work, so the GPU never reaches 100% even while the service is saturated.
+GPU utilisation alone would hide the problem, averaged CPU can look moderate while one stage is the
+bottleneck, and loaded versions are unrelated to load.
+"""
+
+[[questions]]
+id = "08-27"
+topic = "Alerting practice"
+question = """
+An alert rule has expr: triton:avg_queue_ms > 10 and for: 1m. A single 15-second spike pushes queue
+time to 40 ms, then it returns to 2 ms. What happens?
+"""
+options = [
+  "The alert becomes pending and then resets without firing, because the condition did not hold for a full minute",
+  "The alert fires immediately because 40 ms is four times the threshold",
+  "The alert fires after one minute even though the condition cleared",
+  "Prometheus stores the spike and fires the alert at the next evaluation of any rule",
+]
+answer = ["A"]
+explanation = """
+The for: duration requires the expression to stay true for that long before the alert moves from
+pending to firing. A short spike makes it pending, and when the condition clears it resets. This
+avoids paging on blips; the size of the spike does not bypass the duration.
+"""
+
+[[questions]]
+id = "08-28"
+topic = "Latency metrics"
+question = """
+Triton's summary metric reports a P95 of 9 ms for a model, while the load generator measures a P95 of
+14 ms for the same requests over HTTP. What explains the difference?
+"""
+options = [
+  "The server measures from request arrival inside Triton to response; the client also includes HTTP and JSON handling, network and client queueing",
+  "Triton's summary is wrong and should be ignored",
+  "The client measures only compute time",
+  "Summaries report the mean, not the 95th percentile",
+]
+answer = ["A"]
+explanation = """
+Server-side latency covers queueing and execution inside Triton. The client's number adds
+serialization, the network round trip and its own thread scheduling, so it is always larger. SLOs
+are usually defined where users experience them (client or gateway), with server metrics used to
+locate where the time goes. Triton's summary does report quantiles.
+"""

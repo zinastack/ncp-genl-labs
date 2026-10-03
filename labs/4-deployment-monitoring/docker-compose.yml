@@ -1,16 +1,20 @@
 # Section 4 stack (GPU instance): Triton (Lab 07) + DCGM exporter + Prometheus + Grafana (Lab 08).
 #   make triton-up     → build & start everything
 #   make triton-down   → stop
+# Triton runs in EXPLICIT model-control mode: only text_classifier loads at start; the tasks load the
+# other models with `make load M=...` and re-read edited configs with `make reload M=...`.
 # Ports: Triton 8000/8001/8002 · Prometheus 9090 · Grafana 3000 · DCGM 9400
 services:
   triton:
     build:
       context: 07-model-deployment/triton
-      args: {TRITON_VERSION: "${TRITON_VERSION:-24.12}"}
-    image: genl-labs/triton-textclf:${TRITON_VERSION:-24.12}
-    command: ["tritonserver", "--model-repository=/models", "--strict-readiness=true", "--log-verbose=0"]
+      args: {TRITON_VERSION: "${TRITON_VERSION:-25.08}"}
+    image: genl-labs/triton-textclf:${TRITON_VERSION:-25.08}
+    command: ["tritonserver", "--model-repository=/models", "--model-control-mode=explicit",
+              "--load-model=text_classifier", "--strict-readiness=true",
+              "--metrics-config=summary_latencies=true", "--log-verbose=0"]
     volumes:
-      - ./07-model-deployment/triton/model_repository:/models   # edit config.pbtxt, then restart
+      - ./07-model-deployment/triton/model_repository:/models   # edit config.pbtxt, then make reload M=...
     ports: ["8000:8000", "8001:8001", "8002:8002"]
     shm_size: 1g
     deploy:

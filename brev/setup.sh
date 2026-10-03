@@ -74,8 +74,9 @@ if [[ "$LAB_SECTION" == all || "$LAB_SECTION" == 3 ]]; then
 fi
 
 if [[ "$LAB_SECTION" == all || "$LAB_SECTION" == 4 ]]; then
-  log "Building the Triton image and pulling monitoring images (several GB, done once)"
-  (cd labs/4-deployment-monitoring && docker compose build triton && docker compose pull dcgm-exporter prometheus grafana) \
+  log "Building the Triton image, pulling monitoring + Triton SDK images (~40 GB, done once)"
+  (cd labs/4-deployment-monitoring && docker compose build triton && docker compose pull dcgm-exporter prometheus grafana \
+     && docker pull -q "nvcr.io/nvidia/tritonserver:$(grep -E '^TRITON_VERSION' Makefile | awk '{print $3}')-py3-sdk") \
     || warn "docker compose failed; check that Docker and the NVIDIA Container Toolkit are installed"
 fi
 

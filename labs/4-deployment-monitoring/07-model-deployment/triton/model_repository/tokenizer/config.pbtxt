@@ -1,0 +1,12 @@
+# Ensemble step 1: text → token ids, on CPU (tokenization is string work; keep the GPU for the model).
+name: "tokenizer"
+backend: "python"
+max_batch_size: 16
+
+input [ { name: "TEXT" data_type: TYPE_STRING dims: [ 1 ] } ]
+output [
+  { name: "input_ids" data_type: TYPE_INT32 dims: [ 128 ] },
+  { name: "attention_mask" data_type: TYPE_INT32 dims: [ 128 ] }
+]
+
+instance_group [ { count: 2 kind: KIND_CPU } ]

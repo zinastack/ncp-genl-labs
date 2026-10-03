@@ -1,3 +1,4 @@
+# Tasks 2 and 3 edit THIS file. After each change: make reload-07 M=text_classifier, then make perf-07.
 name: "text_classifier"
 backend: "python"
 max_batch_size: 16
@@ -10,7 +11,6 @@ output [
   { name: "SCORE" data_type: TYPE_FP32 dims: [ 1 ] }
 ]
 
-# Experiment: change these, restart (make triton-up), and re-run the perf sweep (make gpu-07).
 dynamic_batching {
   preferred_batch_size: [ 4, 8 ]
   max_queue_delay_microseconds: 2000

@@ -1,0 +1,46 @@
+# Task K6: a canary. Same Service (selector app=triton), separate Deployment with version=v2.
+# Traffic splits by READY pod count: 3 stable + 1 canary ≈ 25% to v2. v2 is deliberately slower
+# (EXTRA_LATENCY_MS) so the canary analysis has something to catch.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: triton-v2
+  labels: {app: triton}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: triton, version: v2}
+  template:
+    metadata:
+      labels: {app: triton, version: v2}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8002"
+    spec:
+      containers:
+        - name: triton
+          image: genl-labs/triton-textclf:__TAG__
+          imagePullPolicy: IfNotPresent
+          args: ["tritonserver", "--model-repository=/models", "--model-control-mode=explicit",
+                 "--load-model=text_classifier", "--strict-readiness=true",
+                 "--metrics-config=summary_latencies=true"]
+          env:
+            - {name: EXTRA_LATENCY_MS, value: "40"}
+          ports:
+            - {containerPort: 8000, name: http}
+            - {containerPort: 8002, name: metrics}
+          resources:
+            requests: {cpu: "1", memory: 3Gi}
+            limits: {nvidia.com/gpu: 1, memory: 6Gi}
+          startupProbe:
+            httpGet: {path: /v2/health/ready, port: http}
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /v2/health/ready, port: http}
+            periodSeconds: 5
+          volumeMounts:
+            - {name: dshm, mountPath: /dev/shm}
+      volumes:
+        - name: dshm
+          emptyDir: {medium: Memory, sizeLimit: 1Gi}

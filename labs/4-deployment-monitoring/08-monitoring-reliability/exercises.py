@@ -1,6 +1,10 @@
-"""Lab 08 — Production Monitoring & Reliability. Fill in every TODO, then run:
+"""Lab 08 — the calculations behind monitoring. Fill in every TODO, then run:
 
-    pytest labs/4-deployment-monitoring/08-monitoring-reliability
+    make test-08
+
+The monitoring work itself is hands-on: README.md → Tasks (Prometheus, Grafana, DCGM, alerts,
+failure drills, drift) on the GPU instance. loadgen.py, drift.py and the Kubernetes canary check
+call these functions; run them with USE_EXERCISES=1 to use yours.
 """
 
 import hashlib
@@ -78,53 +82,6 @@ def should_page(
 
 
 # 6 ─────────────────────────────────────────────────────────────────────────────
-def retraining_decision(
-    psi_value: float, accuracy: float, baseline_accuracy: float, new_labeled: int,
-    max_drop: float = 0.03, min_new_labeled: int = 5000,
-) -> tuple[bool, list[str]]:
-    """Return (retrain?, reasons). Reasons, in this order:
-      "drift"        if psi_value > 0.25
-      "quality_drop" if baseline_accuracy − accuracy > max_drop
-      "new_data"     if new_labeled >= min_new_labeled
-    Retrain if any reason applies.
-    """
-    raise NotImplementedError
-
-
-# 7 ─────────────────────────────────────────────────────────────────────────────
-class ModelRegistry:
-    """Minimal registry for ONE model name.
-
-    register(version, metrics)  → store; stage "staging". Duplicate version → ValueError.
-    promote(version)            → becomes "production"; previous production → "archived".
-                                  Refuse (ValueError) unless metrics["eval_passed"] is True.
-    production()                → current production version or None
-    rollback()                  → re-promote the most recently archived version (the one that was
-                                  production just before the current one); current → "archived".
-                                  ValueError if there's nothing to roll back to.
-    stage(version)              → stage string
-    """
-
-    def __init__(self) -> None:
-        raise NotImplementedError
-
-    def register(self, version: str, metrics: dict) -> None:
-        raise NotImplementedError
-
-    def promote(self, version: str) -> None:
-        raise NotImplementedError
-
-    def production(self) -> str | None:
-        raise NotImplementedError
-
-    def rollback(self) -> str:
-        raise NotImplementedError
-
-    def stage(self, version: str) -> str:
-        raise NotImplementedError
-
-
-# 8 ─────────────────────────────────────────────────────────────────────────────
 def canary_route(request_key: str, canary_percent: float) -> str:
     """Sticky routing: "canary" if int(md5(key).hexdigest(), 16) % 100 < canary_percent else "stable"."""
     raise NotImplementedError
@@ -142,7 +99,7 @@ def canary_verdict(
     raise NotImplementedError
 
 
-# 9 ─────────────────────────────────────────────────────────────────────────────
+# 7 ─────────────────────────────────────────────────────────────────────────────
 def merge_histograms(per_replica_counts: list[list[int]]) -> list[int]:
     """Add cumulative bucket counts from several replicas (same bucket bounds), bucket by bucket."""
     raise NotImplementedError
@@ -159,28 +116,7 @@ def histogram_quantile(bounds: list[float], cumulative_counts: list[int], q: flo
     raise NotImplementedError
 
 
-# 10 ────────────────────────────────────────────────────────────────────────────
-class CircuitBreaker:
-    """States: "closed" (normal), "open" (fail fast), "half_open" (one trial allowed).
-
-    allow(now): if open and now − opened_at ≥ reset_timeout → become half_open.
-                Return True unless the state is "open".
-    record(success, now): success → closed, failures = 0.
-                failure → failures += 1; if half_open or failures ≥ failure_threshold → open
-                (opened_at = now).
-    """
-
-    def __init__(self, failure_threshold: int, reset_timeout: float) -> None:
-        raise NotImplementedError
-
-    def allow(self, now: float) -> bool:
-        raise NotImplementedError
-
-    def record(self, success: bool, now: float) -> None:
-        raise NotImplementedError
-
-
-# 11 ────────────────────────────────────────────────────────────────────────────
+# 8 ─────────────────────────────────────────────────────────────────────────────
 def backoff_delays(attempts: int, base: float, cap: float, jitter: Callable[[float], float]) -> list[float]:
     """Exponential backoff with full jitter: attempt i waits jitter(min(cap, base × 2^i)),
     where jitter(upper) returns a delay between 0 and upper (random in production).
@@ -188,17 +124,7 @@ def backoff_delays(attempts: int, base: float, cap: float, jitter: Callable[[flo
     raise NotImplementedError
 
 
-# 12 ────────────────────────────────────────────────────────────────────────────
+# 9 ─────────────────────────────────────────────────────────────────────────────
 def embedding_drift(reference: np.ndarray, current: np.ndarray) -> float:
     """1 − cosine similarity between the mean embedding of `reference` (n, d) and of `current` (m, d)."""
-    raise NotImplementedError
-
-
-# 13 ────────────────────────────────────────────────────────────────────────────
-def gpu_node_action(metrics: dict[str, float], max_temp_c: float = 85.0) -> tuple[str, list[str]]:
-    """Decide what to do with a GPU node from DCGM metrics (missing keys count as 0).
-    "drain" with reasons ["xid"] and/or ["ecc_dbe"] (in that order) if DCGM_FI_DEV_XID_ERRORS > 0
-    or DCGM_FI_DEV_ECC_DBE_VOL_TOTAL > 0. Otherwise ("alert", ["temperature"]) if
-    DCGM_FI_DEV_GPU_TEMP ≥ max_temp_c. Otherwise ("ok", []).
-    """
     raise NotImplementedError

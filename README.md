@@ -7,14 +7,14 @@ Every lab combines three things:
 1. **Review notes** (`README.md`): the concepts, numbers and exam traps for one blueprint domain.
 2. **Exercises you implement** (`exercises.py`), checked by tests. They run on a laptop CPU in seconds.
    **`SOLUTION.md`** then explains every solution step by step, with worked numbers.
-3. **Exam-style questions** (`quiz.toml`): 304 scenario questions with explanations, including a timed mock exam.
+3. **Exam-style questions** (`quiz.toml`): 320 scenario questions with explanations, including a timed mock exam.
 
 Each lab also has a **GPU part** (`gpu_lab.py` plus section `make` targets) that runs your code on
 real models on a cheap cloud GPU (L4/T4 via Brev or AWS). See [brev/README.md](brev/README.md).
 
 ## Launched from Brev? Start here
 
-Each section has its own Brev Launchable with a cheap GPU (1× L4 or T4; 2× L4 for Section 3).
+Each section has its own Brev Launchable with a cheap GPU (1× L4; 2× L4 for Section 3).
 The setup script has already cloned this repo to `/home/ubuntu/ncp-genl-labs`, created `.venv`,
 installed the section's GPU packages and generated a Jupyter notebook next to every `gpu_lab.py`.
 Setup takes a few minutes after the instance starts.
@@ -35,7 +35,7 @@ make quiz-01            # exam-style questions for the lab
 | S1 Foundations & Prompting | 01, 02 | 1× L4 | |
 | S2 Data & Fine-Tuning | 03, 04 | 1× L4 | |
 | S3 Optimization & Acceleration | 05, 06 | 2× L4 | |
-| S4 Deployment & Monitoring | 07, 08 | 1× T4 | `grafana` (3000), `prometheus` (9090) |
+| S4 Deployment & Monitoring | 07, 08 | 1× L4 | `grafana` (3000), `prometheus` (9090) |
 | S5 Evaluation & Responsible AI | 09, 10 | 1× L4 | |
 
 All models are public. You can optionally set `HF_TOKEN` when you deploy for faster Hugging Face downloads.
@@ -51,8 +51,8 @@ All models are public. You can optionally set `HF_TOKEN` when you deploy for fas
 | | [04](labs/2-data-finetuning/04-fine-tuning) | Fine-Tuning | 13% | full FT vs LoRA vs QLoRA memory; LoRA SFT with your collator and loss |
 | **3 · Optimization & Acceleration** | [05](labs/3-optimization-acceleration/05-model-optimization) | Model Optimization | 17% | tensor-core TFLOPS, decode roofline, checkpointing, INT8/NF4, speculative decoding |
 | | [06](labs/3-optimization-acceleration/06-gpu-acceleration) | GPU Acceleration & Optimization | 14% | NCCL all-reduce bandwidth, DDP scaling, DDP vs FSDP, Nsight Systems |
-| **4 · Deployment & Monitoring** | [07](labs/4-deployment-monitoring/07-model-deployment) | Model Deployment | 9% | Triton (Python backend) + dynamic batching + perf_analyzer; K8s manifests |
-| | [08](labs/4-deployment-monitoring/08-monitoring-reliability) | Production Monitoring & Reliability | 7% | Prometheus + Grafana + DCGM on your Triton, load phases, alerts |
+| **4 · Deployment & Monitoring** | [07](labs/4-deployment-monitoring/07-model-deployment) | Model Deployment | 9% | hands-on tasks: Triton batching/instances/ensembles, TensorRT, TensorRT-LLM, NIM, Kubernetes (k3s) GPU scheduling, HPA, rollouts |
+| | [08](labs/4-deployment-monitoring/08-monitoring-reliability) | Production Monitoring & Reliability | 7% | hands-on tasks: Prometheus + Grafana + DCGM, alerts that fire, failure drills, drift, canary |
 | **5 · Evaluation & Responsible AI** | [09](labs/5-evaluation-responsible-ai/09-evaluation) | Evaluation | 7% | perplexity, retrieval vs reranking, bootstrap CIs, LLM-judge κ, lm-eval-harness |
 | | [10](labs/5-evaluation-responsible-ai/10-safety-ethics) | Safety, Ethics & Compliance | 5% | counterfactual bias probe, red-team ASR, NeMo Guardrails |
 

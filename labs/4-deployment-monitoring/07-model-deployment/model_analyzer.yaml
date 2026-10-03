@@ -1,0 +1,23 @@
+# Task 7: let Model Analyzer search configs for distilbert_onnx instead of you editing config.pbtxt
+# by hand. It launches its own Triton containers (docker mode), sweeps instance count, max_batch_size
+# and dynamic batching against concurrency, and ranks the configs under a latency constraint.
+# Paths (model_repository, export_path, output repository) are passed by `make ma-07`.
+run_config_search_mode: quick          # guided search; "brute" tries every combination (much slower)
+run_config_search_max_concurrency: 64
+run_config_search_max_instance_count: 3
+run_config_search_max_model_batch_size: 16
+triton_launch_mode: docker
+override_output_model_repository: true
+
+profile_models:
+  distilbert_onnx:
+    perf_analyzer_flags:
+      input-data: zero
+      shape:
+        - input_ids:128
+        - attention_mask:128
+    constraints:
+      perf_latency_p99:
+        max: 30                        # ms: configs slower than this are rejected
+    objectives:
+      - perf_throughput                # among the survivors, the highest throughput wins

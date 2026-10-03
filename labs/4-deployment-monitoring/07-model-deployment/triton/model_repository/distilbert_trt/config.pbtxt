@@ -1,0 +1,26 @@
+# A TensorRT engine built from the ONNX file with trtexec (make trt-build PREC=fp16).
+# max_batch_size must not exceed the batch dimension of the engine's optimization profile
+# (MAX_BS when you built it): Triton refuses to load the model otherwise.
+name: "distilbert_trt"
+platform: "tensorrt_plan"
+max_batch_size: 16
+
+input [
+  { name: "input_ids" data_type: TYPE_INT32 dims: [ -1 ] },
+  { name: "attention_mask" data_type: TYPE_INT32 dims: [ -1 ] }
+]
+output [
+  { name: "logits" data_type: TYPE_FP32 dims: [ 2 ] }
+]
+
+dynamic_batching { max_queue_delay_microseconds: 1000 }
+instance_group [ { count: 1 kind: KIND_GPU } ]
+
+# Task 6: uncomment, reload, and compare the first-request latency (make first-request-07 M=distilbert_trt).
+# Triton runs these requests before it marks the model READY.
+# model_warmup [ {
+#   name: "zeros"
+#   batch_size: 8
+#   inputs { key: "input_ids" value: { data_type: TYPE_INT32 dims: [ 128 ] zero_data: true } }
+#   inputs { key: "attention_mask" value: { data_type: TYPE_INT32 dims: [ 128 ] zero_data: true } }
+# } ]

@@ -1,0 +1,9 @@
+# NVIDIA device plugin config (task K3). replicas: 1 = one pod per physical GPU (the default).
+# replicas: N = time-slicing: the node advertises N × nvidia.com/gpu and N pods share each GPU in
+# turns. No memory or fault isolation between them (that is what MIG gives you on A100/H100).
+version: v1
+sharing:
+  timeSlicing:
+    resources:
+      - name: nvidia.com/gpu
+        replicas: __REPLICAS__

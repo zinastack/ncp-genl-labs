@@ -1,0 +1,12 @@
+# Ensemble step 3: logits → label + probability, on CPU.
+name: "postprocess"
+backend: "python"
+max_batch_size: 16
+
+input [ { name: "logits" data_type: TYPE_FP32 dims: [ 2 ] } ]
+output [
+  { name: "LABEL" data_type: TYPE_STRING dims: [ 1 ] },
+  { name: "SCORE" data_type: TYPE_FP32 dims: [ 1 ] }
+]
+
+instance_group [ { count: 1 kind: KIND_CPU } ]

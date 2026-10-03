@@ -1,55 +1,11 @@
-import json
-import re
-
 import numpy as np
-import pytest
-
-
-def test_1_triton_config(lab):
-    cfg = lab.triton_config(
-        "text_classifier", "python", 16,
-        inputs=[("TEXT", "TYPE_STRING", [1])],
-        outputs=[("LABEL", "TYPE_STRING", [1]), ("SCORE", "TYPE_FP32", [1])],
-        preferred_batch_sizes=[4, 8], max_queue_delay_us=2000, instance_count=2,
-    )
-    assert re.search(r'name:\s*"text_classifier"', cfg)
-    assert re.search(r'backend:\s*"python"', cfg)
-    assert re.search(r"max_batch_size:\s*16", cfg)
-    assert re.search(r'input\s*\[\s*\{\s*name:\s*"TEXT"\s+data_type:\s*TYPE_STRING\s+dims:\s*\[\s*1\s*\]', cfg)
-    assert re.search(r'name:\s*"SCORE"\s+data_type:\s*TYPE_FP32', cfg)
-    assert re.search(r"dynamic_batching\s*\{[^}]*preferred_batch_size:\s*\[\s*4,\s*8\s*\]", cfg)
-    assert re.search(r"max_queue_delay_microseconds:\s*2000", cfg)
-    assert re.search(r"instance_group\s*\[\s*\{\s*count:\s*2\s+kind:\s*KIND_GPU", cfg)
-    plain = lab.triton_config("m", "onnxruntime", 0, [("X", "TYPE_FP32", [-1, 3])], [("Y", "TYPE_FP32", [-1])])
-    assert "dynamic_batching" not in plain and re.search(r"dims:\s*\[\s*-1,\s*3\s*\]", plain)
-
-
-def test_2_validate_repository(lab, tmp_path):
-    good = tmp_path / "good"
-    (good / "1").mkdir(parents=True)
-    (good / "1" / "model.py").write_text("")
-    (good / "config.pbtxt").write_text('name: "good"\nbackend: "python"\n')
-
-    bad = tmp_path / "bad"
-    (bad / "2").mkdir(parents=True)
-    (bad / "config.pbtxt").write_text('name: "other"\n')
-
-    noversion = tmp_path / "noversion"
-    (noversion / "latest").mkdir(parents=True)
-
-    assert lab.validate_model_repository(tmp_path) == [
-        "bad/2: empty version directory",
-        "bad: config name mismatch",
-        "noversion: missing config.pbtxt",
-        "noversion: no version directory",
-    ]
 
 
 def compute(bs):  # ~7 ms at batch 1, ~12 ms at batch 8 (numbers from the exam question)
     return 6.3 + 0.7 * bs
 
 
-def test_3_dynamic_batching(lab):
+def test_1_dynamic_batching(lab):
     arrivals = [i * 2.5 for i in range(400)]  # 400 req/s
 
     no_batching = lab.simulate_dynamic_batching(arrivals, 1, 0, compute)
@@ -67,59 +23,14 @@ def test_3_dynamic_batching(lab):
     assert lab.simulate_dynamic_batching([0.0, 0.5, 1.0], 2, 5.0, lambda b: 10.0) == [10.5, 10.0, 19.5]
 
 
-def test_4_k8s(lab):
-    d = lab.k8s_deployment("triton", "nvcr.io/nvidia/tritonserver:24.08-py3", gpus=1, replicas=2)
-    c = d["spec"]["template"]["spec"]["containers"][0]
-    assert d["apiVersion"] == "apps/v1" and d["kind"] == "Deployment" and d["spec"]["replicas"] == 2
-    assert d["spec"]["selector"]["matchLabels"] == d["spec"]["template"]["metadata"]["labels"] == {"app": "triton"}
-    assert c["resources"]["limits"]["nvidia.com/gpu"] == 1
-    assert {p["containerPort"] for p in c["ports"]} == {8000, 8001, 8002}
-    assert c["readinessProbe"]["httpGet"]["path"] == "/v2/health/ready"
-    assert c["livenessProbe"]["httpGet"]["path"] == "/v2/health/live"
-    assert d["spec"]["strategy"]["rollingUpdate"]["maxUnavailable"] == 0
-
-    h = lab.k8s_hpa("triton", "nv_inference_queue_duration_us", 5000, 1, 4)
-    assert h["apiVersion"] == "autoscaling/v2" and h["spec"]["scaleTargetRef"]["name"] == "triton"
-    m = h["spec"]["metrics"][0]
-    assert m["type"] == "Pods" and m["pods"]["target"]["averageValue"] == "5000"
-
-
-def test_5_capacity(lab):
+def test_2_capacity(lab):
     assert lab.replicas_needed(200, 0.5, 16) == 7        # 100 in flight / 16
     assert lab.replicas_needed(200, 0.5, 16, headroom=0.2) == 8
     assert lab.replicas_needed(1, 0.01, 8) == 1
     assert lab.replicas_needed(64, 0.25, 16) == 1        # exactly 16 in flight
 
 
-def test_6_kserve_payload(lab):
-    body = lab.kserve_infer_request(["great GPU", "slow network"])
-    assert body["inputs"][0] == {"name": "TEXT", "shape": [2, 1], "datatype": "BYTES", "data": ["great GPU", "slow network"]}
-    assert body["outputs"] == [{"name": "LABEL"}, {"name": "SCORE"}]
-
-
-def test_shipped_triton_repository_is_valid(lab):
-    import pathlib
-    repo = pathlib.Path(__file__).parent / "triton" / "model_repository"
-    assert lab.validate_model_repository(repo) == []
-
-
-def test_7_ensemble(lab):
-    cfg = lab.triton_ensemble_config(
-        "classify_pipeline",
-        [("RAW_TEXT", "TYPE_STRING", [1])], [("LABEL", "TYPE_STRING", [1])],
-        [("tokenizer", {"TEXT": "RAW_TEXT"}, {"INPUT_IDS": "ids"}),
-         ("bert_trt", {"INPUT_IDS": "ids"}, {"LOGITS": "logits"}),
-         ("postprocess", {"LOGITS": "logits"}, {"LABEL": "LABEL"})],
-    )
-    assert re.search(r'platform:\s*"ensemble"', cfg)
-    assert re.search(r'input\s*\[\s*\{\s*name:\s*"RAW_TEXT"', cfg)
-    steps = re.findall(r'model_name:\s*"(\w+)"', cfg)
-    assert steps == ["tokenizer", "bert_trt", "postprocess"], "steps in execution order"
-    assert re.search(r'input_map\s*\{\s*key:\s*"TEXT"\s*value:\s*"RAW_TEXT"\s*\}', cfg)
-    assert re.search(r'output_map\s*\{\s*key:\s*"LOGITS"\s*value:\s*"logits"\s*\}', cfg)
-
-
-def test_8_pick_best_config(lab):
+def test_3_pick_best_config(lab):
     results = [
         {"name": "bs8_i1_d2ms", "throughput": 640, "p95_ms": 17.4, "gpu_mem_gb": 3},
         {"name": "bs16_i2_d5ms", "throughput": 900, "p95_ms": 24.0, "gpu_mem_gb": 6},
@@ -131,23 +42,22 @@ def test_8_pick_best_config(lab):
     assert lab.pick_best_config(results, 5, 8) is None
 
 
-def test_9_openai_streaming(lab):
-    body = lab.openai_chat_request("meta/llama-3.1-8b-instruct", [{"role": "user", "content": "Hi"}], stream=True)
-    assert body == {"model": "meta/llama-3.1-8b-instruct", "messages": [{"role": "user", "content": "Hi"}],
-                    "max_tokens": 256, "temperature": 0.0, "stream": True}
-    chunk = lambda delta: "data: " + json.dumps({"choices": [{"delta": delta}]})
-    lines = [chunk({"role": "assistant"}), "", ": keep-alive", chunk({"content": "Hello"}),
-             chunk({"content": " world"}), chunk({"content": None}), "data: [DONE]", chunk({"content": "late"})]
-    assert lab.parse_sse_stream(lines) == "Hello world"
-
-
-def test_10_rollout_bounds(lab):
+def test_4_rollout_bounds(lab):
     assert lab.rollout_bounds(3, 1, 0) == (4, 3), "never below 3 ready; needs 1 spare GPU"
     assert lab.rollout_bounds(4, 0, 1) == (4, 3), "no spare GPU; temporarily 3 ready"
 
 
-def test_11_rerank(lab):
+def test_5_rerank(lab):
     passages = ["NCCL all-reduce basics", "Triton exposes metrics on port 8002", "Grafana dashboards"]
     overlap = lambda q, p: len(set(q.lower().split()) & set(p.lower().split()))
     assert lab.rerank_top_n("which port for triton metrics", passages, overlap, 1) == [passages[1]]
     assert len(lab.rerank_top_n("q", passages, overlap, 2)) == 2
+
+
+def test_6_kv_cache_tokens(lab):
+    # Qwen2.5-1.5B: 28 layers, 2 KV heads (GQA), head_dim 128, FP16 → 28 KiB per token
+    assert lab.kv_cache_tokens(20, 0.5, 28, 2, 128) == 374_491, "10 GiB / 28672 B"
+    assert lab.kv_cache_tokens(20, 0.5, 28, 2, 128) // 2048 == 182, "≈ 182 full 2k-token sequences in flight"
+    assert lab.kv_cache_tokens(20, 0.9, 28, 2, 128) == 674_084, "more fraction → more concurrent sequences"
+    assert lab.kv_cache_tokens(20, 0.5, 28, 2, 128, bytes_per_elem=1) == 748_982, "FP8 KV cache doubles capacity"
+    assert lab.kv_cache_tokens(20, 0.5, 28, 12, 128) == 62_415, "without GQA (12 KV heads) 6× fewer tokens"

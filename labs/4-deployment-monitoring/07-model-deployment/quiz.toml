@@ -550,3 +550,265 @@ Start-up should be fast and self-contained. Pre-baked weights (as in this lab's 
 shared volume or model cache avoid the network dependency and shorten cold starts. Per-request
 downloads are absurd, more frequent liveness probes would kill loading pods sooner, and :latest makes builds unreproducible.
 """
+
+[[questions]]
+id = "07-29"
+topic = "TensorRT engines"
+question = """
+A team builds a TensorRT engine (model.plan) for a BERT classifier on their L4 CI runners and copies
+it into the Triton model repository on their new H100 inference servers. The model fails to load.
+What is the correct fix?
+"""
+options = [
+  "Build the engine on (or for) the H100 with the TensorRT version that the target Triton release uses",
+  "Set instance_group kind to KIND_CPU so the plan runs without the GPU",
+  "Increase max_batch_size in config.pbtxt so Triton re-optimizes the plan at load time",
+  "Rename model.plan to model.onnx so Triton uses the ONNX Runtime backend instead",
+]
+answer = ["A"]
+explanation = """
+A TensorRT engine is compiled for a specific GPU architecture (L4 is sm_89, H100 is sm_90) and a
+specific TensorRT version. It must be rebuilt for each target GPU and TensorRT release, usually in a
+build step per platform. Triton never re-optimizes a plan; KIND_CPU cannot run a TensorRT engine; a
+plan file is not an ONNX model, so renaming it only produces a different load error.
+"""
+
+[[questions]]
+id = "07-30"
+topic = "TensorRT engines"
+question = """
+An engine was built with trtexec using --minShapes=input_ids:1x128 --optShapes=input_ids:4x128
+--maxShapes=input_ids:8x128. The Triton config for it says max_batch_size: 16. What happens, and what
+are valid fixes? (Select TWO)
+"""
+options = [
+  "Triton refuses to load the model because max_batch_size exceeds the engine's optimization profile",
+  "Rebuild the engine with --maxShapes batch 16, or lower max_batch_size to 8 in config.pbtxt",
+  "The model loads and Triton splits batches of 16 into two batches of 8 automatically",
+  "Increase max_queue_delay_microseconds so batches never exceed 8",
+  "Set preferred_batch_size: [ 16 ] so the engine learns the larger shape at runtime",
+]
+answer = ["A", "B"]
+explanation = """
+The optimization profile defines the shapes the engine supports. Triton checks that the configured
+max_batch_size fits inside the profile and fails the load otherwise. Either rebuild with a larger
+max shape or reduce max_batch_size. Triton does not split batches for TensorRT models, a queue delay
+does not cap batch size, and engines never learn new shapes at runtime.
+"""
+
+[[questions]]
+id = "07-31"
+topic = "TensorRT engines"
+question = """
+An ONNX model already runs on Triton with the ONNX Runtime backend. The team wants lower latency on
+their NVIDIA GPUs this sprint, with the least engineering effort and no separate engine build
+pipeline. What should they do?
+"""
+options = [
+  "Enable the TensorRT execution accelerator in the model's optimization block (gpu_execution_accelerator with precision_mode FP16)",
+  "Rewrite the model as a Python backend that calls PyTorch",
+  "Move the model to KIND_CPU instances and add more replicas",
+  "Increase max_queue_delay_microseconds to 50000 to form larger batches",
+]
+answer = ["A"]
+explanation = """
+ONNX Runtime can hand supported subgraphs to TensorRT through the execution accelerator settings in
+config.pbtxt. It needs one config block and no engine management, at the cost of a slower first load
+while TensorRT builds its engine. A Python/PyTorch backend is usually slower, CPU instances are
+slower still, and a long queue delay increases latency rather than reducing it.
+"""
+
+[[questions]]
+id = "07-32"
+topic = "Model control"
+question = """
+Production Triton servers must pick up a corrected config.pbtxt and a new model version without
+restarting the server, and only when the deployment pipeline says so (never because a file appeared
+half-copied in the repository). Which setup fits?
+"""
+options = [
+  "Run with --model-control-mode=explicit and call the repository load API (POST /v2/repository/models/<name>/load) from the pipeline",
+  "Run with --model-control-mode=poll so Triton loads every change it detects",
+  "Run with the default mode and restart the Triton pod after every change",
+  "Set version_policy to all so Triton reloads automatically on every change",
+]
+answer = ["A"]
+explanation = """
+Explicit mode loads and unloads models only through the API, so the pipeline decides when a change
+takes effect and a load reloads an already loaded model with its new config. Poll mode applies
+whatever it sees, including partially written files. Restarting works but causes downtime and is
+not what was asked. version_policy chooses which versions are served; it does not trigger reloads.
+"""
+
+[[questions]]
+id = "07-33"
+topic = "Instance groups"
+question = """
+A Python-backend model is configured with instance_group [ { count: 2 kind: KIND_CPU } ] to keep
+the GPU free for another model. nvidia-smi still shows the Python model using GPU memory. Why?
+"""
+options = [
+  "A Python model places tensors where its own code decides; it must read args['model_instance_kind'] (and the device id) in initialize() to honour KIND_CPU",
+  "KIND_CPU is ignored whenever max_batch_size is greater than zero",
+  "Triton always places Python models on GPU 0 regardless of the configuration",
+  "The dynamic batcher moves batches to the GPU automatically",
+]
+answer = ["A"]
+explanation = """
+For framework backends Triton places the model on the requested device. A Python backend runs your
+code, and Triton passes the instance kind and device id in initialize(args); if the code moves the
+model to cuda unconditionally, it uses the GPU anyway. max_batch_size and the dynamic batcher have no
+effect on device placement, and Python models are not forced onto GPU 0.
+"""
+
+[[questions]]
+id = "07-34"
+topic = "TensorRT-LLM"
+question = """
+A model is served with TensorRT-LLM using the TensorRT engine backend. Which changes require
+rebuilding the engine? (Select TWO)
+"""
+options = [
+  "Raising max_batch_size from 64 to 256",
+  "Switching the weights to INT8 weight-only quantization",
+  "Changing kv_cache_free_gpu_memory_fraction from 0.5 to 0.9",
+  "Changing the sampling temperature for a request",
+  "Changing the number of streaming clients",
+]
+answer = ["A", "B"]
+explanation = """
+Build-time limits such as max_batch_size, max_num_tokens and max_seq_len, and the quantization of the
+weights, are compiled into a TensorRT engine, so changing them means rebuilding. The KV-cache memory
+fraction is a runtime setting of the executor; sampling parameters are per request; the number of
+clients is just traffic.
+"""
+
+[[questions]]
+id = "07-35"
+topic = "TensorRT-LLM"
+question = """
+A TensorRT-LLM chat endpoint on one 24 GB GPU shows rising time-to-first-token at peak while
+time-per-output-token stays flat. Logs show the KV cache holds only about 40 sequences of the
+typical length, and max_batch_size is 256. What most directly raises the number of requests served
+concurrently?
+"""
+options = [
+  "Give the KV cache more memory: raise kv_cache_free_gpu_memory_fraction and/or quantize weights or the KV cache (INT8/FP8) to free memory",
+  "Raise max_batch_size to 1024",
+  "Lower the maximum output tokens per response to 16 for every user",
+  "Switch from in-flight batching to static batching",
+]
+answer = ["A"]
+explanation = """
+The scheduler can only admit as many sequences as the KV cache can hold, so with room for about 40
+sequences a max_batch_size of 256 is never reached; extra requests wait, which raises TTFT. More cache
+memory (a larger fraction, smaller weights, or an FP8/INT8 KV cache) raises real concurrency. A larger
+max_batch_size changes nothing while the cache is full, truncating every answer breaks the product,
+and static batching makes waiting worse.
+"""
+
+[[questions]]
+id = "07-36"
+topic = "TensorRT-LLM"
+question = """
+After switching a 1.5B-parameter LLM from FP16 to INT8 weight-only quantization (W8A16), decode speed
+(tokens per second per request) improves even though the matrix math still runs in FP16. Why?
+"""
+options = [
+  "Decoding is memory-bandwidth-bound: reading half as many bytes of weights per token makes each decode step faster",
+  "INT8 tensor cores are always used for weight-only quantization",
+  "Weight-only quantization reduces the number of transformer layers",
+  "The KV cache is no longer used with INT8 weights",
+]
+answer = ["A"]
+explanation = """
+At small batch sizes each decode step reads all the weights from memory to produce one token per
+sequence, so memory bandwidth dominates. Storing weights in INT8 halves those bytes; they are
+dequantized on the fly and multiplied in FP16. The layer count is unchanged, the KV cache is still
+used, and weight-only kernels do not run INT8 math on activations.
+"""
+
+[[questions]]
+id = "07-37"
+topic = "NIM"
+question = """
+A NIM container auto-selects a vLLM profile on one cluster and a TensorRT-LLM throughput profile on
+another, so benchmarks are not reproducible across environments. How do you make every deployment
+run the same engine configuration?
+"""
+options = [
+  "List the profiles with list-model-profiles and set NIM_MODEL_PROFILE to the chosen profile id, with a pinned image version",
+  "Set the OpenAI request parameter model to the profile name",
+  "Delete the NIM cache before each start so selection is repeated",
+  "Run the container without GPUs so it always picks the same CPU profile",
+]
+answer = ["A"]
+explanation = """
+NIM picks a profile (backend, precision, tensor parallelism, latency or throughput) that matches the
+detected GPUs unless NIM_MODEL_PROFILE pins one; pinning the image version as well keeps the set of
+profiles fixed. The model field of a request does not choose engines, clearing the cache repeats the
+same automatic choice, and LLM NIMs are not meant to run without GPUs.
+"""
+
+[[questions]]
+id = "07-38"
+topic = "GPU sharing"
+question = """
+Four small inference services each need about 15% of one GPU. A platform engineer enables device
+plugin time-slicing with replicas: 4 on a single-GPU node. Which statement is correct?
+"""
+options = [
+  "All four pods are scheduled and share the GPU in turns, but without memory or fault isolation: one pod can exhaust GPU memory for all",
+  "Each pod gets a hard 25% slice of GPU memory and compute",
+  "Time-slicing is the same as MIG and works on any GPU",
+  "Pods can now request nvidia.com/gpu: 0.25",
+]
+answer = ["A"]
+explanation = """
+Time-slicing makes the device plugin advertise several replicas of a GPU so more pods can be
+scheduled, and they take turns on it. There is no memory limit or fault isolation between them.
+MIG (A100, H100 and newer) provides hardware-isolated instances with fixed memory. GPU requests stay
+integers; time-slicing changes how many units the node advertises.
+"""
+
+[[questions]]
+id = "07-39"
+topic = "Kubernetes GPU scheduling"
+question = """
+A cluster has L4 and A100 nodes. GPU feature discovery is installed. An inference Deployment must run
+only on L4 nodes. What is the standard way?
+"""
+options = [
+  "Add a nodeSelector (or node affinity) on the GPU product label, e.g. nvidia.com/gpu.product: NVIDIA-L4",
+  "Request nvidia.com/gpu: 4 so only L4 nodes match",
+  "Set the container image tag to l4",
+  "Add a readiness probe that fails on A100 nodes",
+]
+answer = ["A"]
+explanation = """
+GPU feature discovery labels nodes with the GPU model, memory and capabilities, and scheduling
+constraints (nodeSelector or affinity) use those labels. The GPU count says nothing about the GPU
+type, image tags do not influence scheduling, and a failing readiness probe leaves the pod running on
+the wrong node without traffic instead of placing it correctly.
+"""
+
+[[questions]]
+id = "07-40"
+topic = "Health probes"
+question = """
+An operator unloads a model through Triton's repository API during maintenance. What do the health
+endpoints report, and what does Kubernetes do with a pod using the usual probes (liveness on
+/v2/health/live, readiness on /v2/health/ready with --strict-readiness=true)?
+"""
+options = [
+  "live stays true and ready becomes false: the pod is removed from Service endpoints but not restarted",
+  "live becomes false: the kubelet restarts the container",
+  "Both stay true, so traffic keeps arriving and fails",
+  "ready stays true until the pod is deleted",
+]
+answer = ["A"]
+explanation = """
+The server process is still healthy, so liveness passes and nothing restarts. With strict readiness,
+a model that is not loaded makes readiness fail, so the pod stops receiving traffic until the model
+is loaded again. This is exactly why readiness and liveness are separate probes.
+"""

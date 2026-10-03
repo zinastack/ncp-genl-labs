@@ -18,7 +18,7 @@ INSTANCE  ?= genl-s$(S)
 BREV_TYPES_1 := g2-standard-4:nvidia-l4:1,g6.xlarge,g2-standard-8:nvidia-l4:1
 BREV_TYPES_2 := $(BREV_TYPES_1)
 BREV_TYPES_3 := g2-standard-24:nvidia-l4:2,scaleway_L4x2,n1-highmem-2:nvidia-tesla-t4:2
-BREV_TYPES_4 := n1-standard-4:nvidia-tesla-t4:1,g4dn.xlarge,n1-highmem-4:nvidia-tesla-t4:1
+BREV_TYPES_4 := g2-standard-8:nvidia-l4:1,g6.2xlarge,g2-standard-4:nvidia-l4:1   # L4: TensorRT-LLM INT8/FP8, NIM; 8 vCPUs for k3s
 BREV_TYPES_5 := $(BREV_TYPES_1)
 TYPE      ?= $(BREV_TYPES_$(S))
 
