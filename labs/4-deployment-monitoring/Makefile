@@ -77,7 +77,7 @@ gpu-07: ## Client latency sweep over HTTP (what a real caller sees): make gpu-07
 
 export-onnx: ## Task 4: export DistilBERT to model_repository/distilbert_onnx/1/model.onnx
 	docker run --rm --user $(USER_ID) -e HOME=/tmp -v $(REPO7):/repo -v $(CURDIR)/$(L7)/tools:/tools \
-		$(IMAGE) python /tools/export_onnx.py /repo/distilbert_onnx/1/model.onnx
+		$(IMAGE) python3 /tools/export_onnx.py /repo/distilbert_onnx/1/model.onnx
 
 PREC   ?= fp16
 MIN_BS ?= 1
@@ -281,7 +281,7 @@ drift-08: ## Task 6: reference vs shifted traffic → PSI/KS on input length and
 
 GB ?= 21
 gpu-hog: ## Task 5 drill: hold GB of GPU memory for 5 minutes (GPUMemoryNearlyFull fires)
-	docker run --rm --gpus all $(IMAGE) python -c "import torch, time; \
+	docker run --rm --gpus all $(IMAGE) python3 -c "import torch, time; \
 		x = torch.empty(int($(GB) * 2**30), dtype=torch.uint8, device='cuda'); \
 		print('holding $(GB) GB, Ctrl+C to release'); time.sleep(300)"
 

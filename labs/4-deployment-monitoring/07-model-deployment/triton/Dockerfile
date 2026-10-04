@@ -6,11 +6,14 @@ FROM nvcr.io/nvidia/tritonserver:${TRITON_VERSION}-py3
 
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 RUN pip install --no-cache-dir torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128 \
- && pip install --no-cache-dir "transformers>=4.44,<5" onnx
+ && pip install --no-cache-dir "transformers>=4.44,<5" onnx \
+ && pip install --no-cache-dir --force-reinstall --no-deps numpy==1.26.4
+# ↑ the base image's numpy has broken package metadata (transformers can't read its version);
+#   reinstall the same 1.x release that the Python backend was built against.
 
 # Bake the weights into the image so pods start without internet access and cold starts are faster.
 ENV HF_HOME=/opt/hf
-RUN python -c "from transformers import pipeline; pipeline('text-classification', model='distilbert/distilbert-base-uncased-finetuned-sst-2-english')" \
+RUN python3 -c "from transformers import pipeline; pipeline('text-classification', model='distilbert/distilbert-base-uncased-finetuned-sst-2-english')" \
  && chmod -R a+rX /opt/hf
 ENV HF_HUB_OFFLINE=1
 
