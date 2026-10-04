@@ -45,7 +45,8 @@ Defaults per section (cheapest first, falling back to the next type if one isn't
 `TYPE=<brev type>` (see `brev search gpu`) or `INSTANCE=<name>`. Disk: 100 GB, 200 GB for Section 4
 (override with `DISK=<GB>`). `brev-up` passes it as `--min-disk`, which sizes the disk on GCP/AWS
 types (adjustable, 10 GB-16 TB, billed per GB-month even while stopped) and skips fixed-disk types that
-are smaller. Some providers' types come with a fixed local NVMe disk instead (`brev search gpu` →
+are smaller. It is a request, not a guarantee: a GCP `g2-standard-8` came up with 129 GB when asked for 200,
+so check with `df -h /` and resize the disk in the console if you need more. Some providers' types come with a fixed local NVMe disk instead (`brev search gpu` →
 `DISK` column).
 
 ## Create the Launchables (one per section)
