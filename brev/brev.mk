@@ -18,9 +18,14 @@ INSTANCE  ?= genl-s$(S)
 BREV_TYPES_1 := g2-standard-4:nvidia-l4:1,g6.xlarge,g2-standard-8:nvidia-l4:1
 BREV_TYPES_2 := $(BREV_TYPES_1)
 BREV_TYPES_3 := g2-standard-24:nvidia-l4:2,scaleway_L4x2,n1-highmem-2:nvidia-tesla-t4:2
-BREV_TYPES_4 := g2-standard-8:nvidia-l4:1,g6.2xlarge,g2-standard-4:nvidia-l4:1   # L4: TensorRT-LLM INT8/FP8, NIM; 8 vCPUs for k3s
+# Section 4: L4 for TensorRT-LLM INT8/FP8 and NIM; 8 vCPUs for k3s next to Triton.
+BREV_TYPES_4 := g2-standard-8:nvidia-l4:1,g6.2xlarge,g2-standard-4:nvidia-l4:1
 BREV_TYPES_5 := $(BREV_TYPES_1)
 TYPE      ?= $(BREV_TYPES_$(S))
+# Disk in GB. --min-disk sets the size on types with adjustable disks (GCP/AWS: 10 GB-16 TB) and
+# skips fixed-disk types that are smaller. Section 4 holds ~150 GB of container images.
+DISK_4    := 200
+DISK      ?= $(or $(DISK_$(S)),100)
 
 BREV_TARBALL := $(CURDIR)/.brev-genl-labs.tgz
 need_section = $(if $(filter 1 2 3 4 5,$(S)),,$(error Set S=1..5, e.g. make $@ S=3))
@@ -33,11 +38,11 @@ brev-ls: ## List your Brev instances
 
 brev-plan: ## Preview the GPU types brev-up would try for section S (no cost)
 	$(call need_section)
-	$(BREV_RUN) create $(INSTANCE) --type $(TYPE) --dry-run < /dev/null
+	$(BREV_RUN) create $(INSTANCE) --type $(TYPE) --min-disk $(DISK) --dry-run < /dev/null
 
 brev-up: ## Create a private GPU instance for section S, copy the repo, run setup (billing starts)
 	$(call need_section)
-	$(BREV_RUN) create $(INSTANCE) --type $(TYPE) < /dev/null
+	$(BREV_RUN) create $(INSTANCE) --type $(TYPE) --min-disk $(DISK) < /dev/null
 	@$(MAKE) --no-print-directory brev-sync S=$(S) INSTANCE=$(INSTANCE)
 	@$(MAKE) --no-print-directory brev-hf-token S=$(S) INSTANCE=$(INSTANCE)
 	@$(MAKE) --no-print-directory brev-setup-remote S=$(S) INSTANCE=$(INSTANCE)

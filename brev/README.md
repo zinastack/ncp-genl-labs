@@ -16,7 +16,7 @@ A100/H100s: every GPU lab is sized for a **24 GB L4** or a **16 GB T4**.
 
 Rough cost: T4 instances are typically **$0.35–0.60/h** and L4 **$0.70–1.00/h** (2× L4 ≈ 2×), so a
 2–3 hour session per section costs about **$1–6**. Prices vary by provider and region; check
-Brev's instance picker. **Stop the instance when you're done.** Disk: 100 GB (models, Docker images).
+Brev's instance picker. **Stop the instance when you're done.** Disk: 100 GB (models, Docker images), 200 GB for Section 4.
 
 > T4 notes: no bf16 (the labs switch to fp16 automatically), no FlashAttention-2, no FP8.
 > Everything still runs, and the differences are themselves exam material.
@@ -42,9 +42,11 @@ make brev-stop S=3               # stop billing for compute (disk kept); make br
 
 Defaults per section (cheapest first, falling back to the next type if one isn't available):
 1× L4 for Sections 1, 2, 4 and 5 (Section 4 prefers 8 vCPUs), 2× L4 then 2× T4 for Section 3. Override with
-`TYPE=<brev type>` (see `brev search gpu`) or `INSTANCE=<name>`. `brev create` doesn't take a disk
-size. If a type's default disk turns out too small for models and Docker images, pick a type with a
-larger disk (`brev search gpu --min-disk 100`).
+`TYPE=<brev type>` (see `brev search gpu`) or `INSTANCE=<name>`. Disk: 100 GB, 200 GB for Section 4
+(override with `DISK=<GB>`). `brev-up` passes it as `--min-disk`, which sizes the disk on GCP/AWS
+types (adjustable, 10 GB-16 TB, billed per GB-month even while stopped) and skips fixed-disk types that
+are smaller. Some providers' types come with a fixed local NVMe disk instead (`brev search gpu` →
+`DISK` column).
 
 ## Create the Launchables (one per section)
 
