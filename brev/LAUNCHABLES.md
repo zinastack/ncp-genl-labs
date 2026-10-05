@@ -14,7 +14,7 @@ Launchables but can't create them.
 | **Launch parameter** | `LAB_SECTION` = the section number below |
 | **Optional parameter** | `HF_TOKEN`: left empty; each deployer can add their own (all lab models are public) |
 | **Jupyter** | enabled |
-| **Disk** | 100 GiB (**200 GiB for S4**: Triton, TensorRT, TensorRT-LLM, NIM and SDK images) |
+| **Disk** | 100 GiB (**300 GiB for S4**: Triton, TensorRT, TensorRT-LLM, vLLM, NIM and SDK images) |
 | **Overview page** | Brev renders the repo's root `README.md` (the *Launched from Brev? Start here* section), so keep that section current |
 | **Visibility** | **Only my organization** while you test; switch to *Anyone with the link* or *Everyone (published)* when you open them. New Launchables default to *Anyone with the link*, so change it at creation. |
 

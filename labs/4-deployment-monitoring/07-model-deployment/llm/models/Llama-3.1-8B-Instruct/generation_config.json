@@ -1,0 +1,6 @@
+{
+  "_note": "fields from meta-llama/Llama-3.1-8B-Instruct (gated repo); only the ones the lab uses",
+  "do_sample": true,
+  "temperature": 0.6,
+  "top_p": 0.9
+}

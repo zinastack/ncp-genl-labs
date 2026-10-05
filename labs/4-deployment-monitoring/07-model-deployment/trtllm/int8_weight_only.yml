@@ -1,6 +1,0 @@
-# Task 8d (TensorRT backend only): INT8 weight-only quantization (W8A16) at engine build time.
-# Weights are stored in INT8 and dequantized in the GEMM kernels; activations stay FP16.
-# No calibration data is needed (unlike INT8 SmoothQuant or FP8 activations).
-#   make trtllm-up BACKEND=tensorrt EXTRA=int8_weight_only.yml
-quant_config:
-  quant_algo: W8A16

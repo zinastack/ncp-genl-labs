@@ -161,41 +161,48 @@ breaks the latency budget (calculation 3).
 and instance counts."* → **Model Analyzer**. perf_analyzer measures one config at a time; DCGM measures
 the GPU, not configs; Nsight Systems profiles kernels.
 
-## Task 8 — TensorRT-LLM
+## Task 8 — One LLM, four servers
 
 **What you see.**
-1. The log reports the KV-cache capacity in tokens. With Qwen2.5-1.5B on an L4 and `KV=0.5`, expect
-   on the order of a few hundred thousand tokens: the same arithmetic as `kv_cache_tokens` (28 layers ×
-   2 KV heads × 128 × 2 (K,V) × 2 bytes = 28 KiB per token).
-2. Concurrency 1 → 8 → 32: output tokens/s rises several-fold; **TPOT barely moves** at first; **TTFT
-   rises** with concurrency.
-3. `MBS=4` at concurrency 32: throughput capped near the 4-request level, TTFT explodes (requests wait
-   for one of 4 slots).
-4. `KV=0.05`: the cache holds only a few sequences of 512 + 128 tokens, so the scheduler (guaranteed
-   no-evict) admits fewer requests at once: throughput drops and TTFT rises, like a small MBS.
-5. `MNT=1024`: at most ~2 prompts of 512 tokens are prefilled per iteration, so under a burst
-   prompts wait their turn: TTFT rises while TPOT stays similar.
-6. `BACKEND=tensorrt`: an engine build step at start (minutes), then similar or better speed. INT8
-   weight-only: the weights take about half the memory (more room for KV cache) and TPOT improves.
+1. The plan for Qwen2.5-1.5B on an L4 at `FRACTION=0.9`: weights 2.88 GiB, KV cache ~16.4 GiB (vLLM) or
+   ~16.8 GiB (TensorRT-LLM), ~610,000–630,000 tokens, ~240 sequences of 2,560 tokens. 64 users fit easily.
+2. The server's own log reports a KV cache close to your number. Differences of a few percent come from the
+   overhead guess (activations, CUDA graphs, the CUDA context), which the real server measures by running a
+   dummy forward pass at start-up.
+3. At concurrency 1, TTFT for a 512-token prompt is tens of ms (the prediction is ~26 ms plus HTTP and
+   tokenization) and TPOT is ~15 ms. At 32, TPOT rises only modestly while output tokens/s rises by an
+   order of magnitude, and TTFT p95 grows (prefills of new requests compete with the running decodes).
+4. TensorRT-LLM with the same 0.9 allocates a slightly **larger** cache: its fraction applies to the memory
+   left after the weights, vLLM's to the whole GPU.
+5. Behind Triton the numbers are close to the direct servers; the extra cost is the Python backend and the
+   generate-endpoint wrapping (a few ms per request), not the engine.
+6. Knobs: `PROMPT=8192` cuts the sequences that fit about 3.5×; `FRACTION=0.3` leaves ~2.9 GiB = ~107,000 KV
+   tokens, less than 64 requests × 2,512 tokens, so requests wait (`num_requests_waiting` > 0) and TTFT p95 jumps;
+   `KVBITS=8` doubles the KV tokens; `CHUNK=256` gives `max_num_tokens` 512, so a 2,000-token prompt is spread
+   over several iterations and TTFT multiplies; `USERS=4` caps running sequences at 4, so at concurrency 32 most of the latency is
+   queueing; FP8 weights halve the weight memory and speed up decoding; Qwen2.5-7B (14.2 GiB) still fits
+   but with far fewer sequences.
 
 **Why.**
-- **In-flight (continuous) batching** adds and removes requests *every iteration*, not per batch, so the
-  GPU stays full. Decoding is **memory-bandwidth-bound**: reading the weights once serves the whole
-  batch, so TPOT stays flat while throughput scales, until compute or KV cache runs out.
-- **TTFT** = queueing + prefill. More concurrent users means more prefills compete per iteration.
-- **max_batch_size** = concurrent sequences; **max_num_tokens** = tokens processed per iteration
-  (prefill chunks + one per decoding sequence); **KV fraction** = cache size = how many tokens can be
-  in flight. Each can be the bottleneck.
-- On the **TensorRT backend**, `max_batch_size`, `max_num_tokens`, `max_seq_len` and quantization are
-  **baked into the engine**: change them and you rebuild. The KV fraction is a runtime setting.
-- **Weight-only INT8 (W8A16)**: decode time is dominated by reading weights from memory; half the bytes
-  → faster decode and more free memory, with no calibration needed. FP8 (Ada/Hopper) quantizes
-  activations too, which needs calibration.
+- **Server config vs request.** Sizes and scheduling (`max_seq_len`/`max_model_len`, `max_batch_size`/
+  `max_num_seqs`, `max_num_tokens`/`max_num_batched_tokens`, KV memory, block size, chunked prefill) are
+  fixed when the server starts. Sampling (`temperature`, `top_p`, `top_k`, penalties, `max_tokens`, stop) is
+  per request, with defaults from `generation_config.json` (vLLM applies them; check what your server does).
+- **TTFT** = waiting + prefill (compute-bound: ~2 × parameters FLOPs per prompt token). **TPOT** = one decode
+  step (memory-bound: read all weights once per step, shared by the whole batch, plus every sequence's KV
+  cache). That is why batching multiplies throughput almost for free, until the KV reads dominate or the
+  cache is full.
+- **Three limits on concurrency:** `max_batch_size` (configured), KV-cache capacity (memory), and the
+  per-iteration token budget (`max_num_tokens`). The lowest one wins.
+- **Triton wrapping.** For LLM backends Triton's own batcher is **off** (`max_batch_size: 0` in
+  `triton_config`): the engine does in-flight batching. `decoupled: True` lets one request return many
+  responses (token streaming). The vLLM backend uses `KIND_MODEL`: the model places itself on the GPU(s).
 
-**On the exam.** *"High TTFT at peak, GPU memory mostly used by weights."* → quantize weights (INT8/FP8)
-to free memory for KV cache and raise the batch; consider chunked prefill. Increasing `max_batch_size`
-alone fails if the KV cache can't hold the extra sequences; static batching makes TTFT worse; more
-`max_tokens` per response doesn't change TTFT.
+**On the exam.** *"Long prompts make TTFT spike for everyone while decoding is fine."* → enable chunked
+prefill / tune the token budget (`max_num_tokens`). *"The server rejects requests with long prompts plus
+`max_tokens`."* → `max_model_len`/`max_seq_len` too small (or lower `max_tokens`). *"Requests queue while
+GPU memory shows free space reserved."* → the KV-cache fraction or `max_num_seqs` limits concurrency.
+Raising temperature or `top_p` never changes throughput or memory.
 
 ## Task 9 — NIM
 
@@ -355,21 +362,96 @@ more accurate, too slow for the whole corpus. Retrieve many, rerank, keep the to
 | Send top-50 passages to the LLM | ❌ lowers precision further |
 | Raise the temperature | ❌ doesn't fix retrieval |
 
-### 6 — `kv_cache_tokens`: how many tokens fit
+### Part B — serving one LLM (calculations 6–19)
+
+Worked for the lab scenario: **Qwen2.5-1.5B-Instruct on one L4**, prompts ≤ 2,048, answers ≤ 512, 64 users.
+
+**6 · `model_spec` — reading config.json.** `hidden_size 1536`, `num_attention_heads 12`,
+`num_key_value_heads 2` (**GQA**: 6 query heads share each K/V head), `head_dim = 1536/12 = 128`, 28 layers,
+`intermediate_size 8960`, `vocab_size 151936`, `tie_word_embeddings true`.
 
 ```
-bytes per token = 2 (K and V) × layers × KV heads × head_dim × bytes
-Qwen2.5-1.5B, FP16: 2 × 28 × 2 × 128 × 2 = 28,672 B = 28 KiB
-20 GiB free × 0.5 = 10 GiB → 10,737,418,240 / 28,672 = 374,491 tokens ≈ 182 sequences of 2,048 tokens
+per layer: Q,O 2·1536·12·128 = 4.72 M   K,V 2·1536·2·128 = 0.79 M   MLP 3·1536·8960 = 41.29 M
+28 layers = 1,310 M  + embeddings 151,936·1,536 = 233 M (tied: counted once)  = 1,543,569,408 ≈ 1.54 B
 ```
 
-| change | tokens | why |
-|---|---|---|
-| fraction 0.5 → 0.9 | 674,084 | more memory for the cache |
-| FP8 KV cache | 748,982 | half the bytes per element |
-| no GQA (12 KV heads instead of 2) | 62,415 | 6× more K/V vectors per token |
+Qwen2.5-7B is untied (embeddings counted twice) → 7.62 B; Llama-3.1-8B → 8.03 B. All match the model cards.
 
-This is why GQA, FP8 KV cache and weight quantization all raise the concurrency an LLM server can sustain.
+**7, 8 · weights and KV per token.**
+
+```
+weights FP16: 1.5436e9 × 2 B = 2.875 GiB      INT4: 0.72 GiB
+KV per token: 2 (K,V) × 28 layers × 2 KV heads × 128 × 2 B = 28,672 B = 28 KiB
+   without GQA (12 KV heads): 168 KiB   ·   FP8 KV cache: 14 KiB   ·   Llama-3.1-8B: 128 KiB
+```
+
+**9 · `kv_cache_gib` — the same 0.9 means different things.**
+
+| server | parameter | formula | Qwen 1.5B, 0.9 |
+|---|---|---|---|
+| TensorRT-LLM | `kv_cache_free_gpu_memory_fraction` | (22.5 − 2.875 − 1) × 0.9 | **16.76 GiB** |
+| vLLM | `gpu_memory_utilization` | 22.5 × 0.9 − 2.875 − 1 | **16.38 GiB** |
+
+At 0.1, TensorRT-LLM still gets 1.86 GiB of cache; vLLM gets nothing, because 10% of the GPU can't even hold the
+weights. (vLLM's value is also why two vLLM servers can share a GPU at 0.45 each.)
+
+**10 · `max_sequences` — paged KV cache.** Blocks of 32 tokens (TensorRT-LLM default; vLLM uses 16):
+16.76 GiB ÷ (32 × 28 KiB) = 19,615 blocks; a 2,560-token sequence needs 80 blocks → **245 sequences**.
+A 1,000-token sequence still occupies 32 whole blocks (1,024 tokens). Paging wastes at most one block per
+sequence, instead of reserving `max_seq_len` for every request as a contiguous cache would.
+
+**11 · `prefill_iterations` — the token budget and chunked prefill.** Each iteration processes at most
+`max_num_tokens` tokens; 48 decoding sequences use 48 of them. With 2,048, a 4,001-token prompt needs 3
+iterations with chunking. Without chunking it can't be scheduled at all, because the whole prompt must fit
+one iteration. Chunking also keeps decode steps short, which is why it lowers TTFT and ITL spikes under
+mixed traffic.
+
+**12 · `estimate_latency` — prefill vs decode.**
+
+```
+prefill 512 tokens: 2 × 1.54e9 × 512 / (121e12 × 0.5) = 26 ms           ← compute-bound
+decode, batch 1:   (3.09 GB weights + 18 MB KV) / (300 GB/s × 0.7) = 14.8 ms → 68 tok/s
+decode, batch 32:  (3.09 GB + 587 MB KV)        / 210 GB/s        = 17.5 ms → 1,829 tok/s
+```
+
+32× the throughput for +18% step time: the weights are read once per step for the whole batch. At batch 64
+with 2,560-token contexts the KV reads (4.7 GB) exceed the weights and the step grows to ~37 ms: long
+contexts make decoding slower, not just bigger.
+
+**13 · `plan_llm_server`.** `max_seq_len` 2,560; 245 sequences fit, so `max_batch_size = min(64, 245) = 64`;
+`max_num_tokens = ⌈(64 + 2,048)/256⌉ × 256 = 2,304`. Llama-3.1-8B with 5k-token contexts: FP16 weights leave
+room for only **9** sequences (warning: 32 users queue); INT8 → 20; INT4 → 25. Quantizing weights buys
+concurrency through KV-cache memory.
+
+**14–17 · rendering.** Same plan, four syntaxes:
+
+| setting | trtllm-serve | vLLM | Triton + vLLM `model.json` | Triton + TRT-LLM `model.yaml` |
+|---|---|---|---|---|
+| context | `--max_seq_len` | `--max-model-len` | `max_model_len` | `max_seq_len` |
+| running sequences | `--max_batch_size` | `--max-num-seqs` | `max_num_seqs` | `max_batch_size` |
+| tokens per iteration | `--max_num_tokens` | `--max-num-batched-tokens` | `max_num_batched_tokens` | `max_num_tokens` |
+| KV memory | `--kv_cache_free_gpu_memory_fraction` | `--gpu-memory-utilization` | `gpu_memory_utilization` | `kv_cache_config.free_gpu_memory_fraction` |
+| chunked prefill | `enable_chunked_prefill` (extra YAML) | `--enable-chunked-prefill` | `enable_chunked_prefill` | `enable_chunked_prefill` |
+| KV dtype | `kv_cache_config.dtype` | `--kv-cache-dtype` | `kv_cache_dtype` | `kv_cache_config.dtype` |
+
+Triton adds its own layer: `config.pbtxt` (`backend: "vllm"` + `KIND_MODEL`, or the Python LLM-API model)
+and, for TensorRT-LLM, `triton_config: {max_batch_size: 0, decoupled: true}`.
+
+**18 · `effective_sampling`.** Qwen's `generation_config.json` says temperature 0.7, top_p 0.8, top_k 20,
+repetition_penalty 1.1. A request that only sets `max_tokens` runs with **those**, not with 1.0/1.0. A request
+with `temperature: 0` becomes greedy: top_p and top_k no longer matter, repetition_penalty still does.
+This is why "the same prompt gives different answers on two servers" is often a defaults difference.
+
+**19 · `generate_request`.** The same greedy 32-token request:
+
+```
+OpenAI (trtllm-serve, vLLM, NIM)  POST /v1/completions   {"model", "prompt", "max_tokens": 32, "temperature": 0, ...}
+Triton + vLLM                     POST /v2/models/llm/generate_stream  {"text_input", "stream": true, "parameters": {"max_tokens": 32, "temperature": 0, "top_k": -1, ...}}
+Triton + TensorRT-LLM (LLM API)   POST /v2/models/llm/generate_stream  {"text_input", "streaming": true, "sampling_param_max_tokens": 32, "sampling_param_top_k": 1}
+```
+
+And `prompt_tokens + max_tokens > max_model_len` is rejected by every server: size `max_seq_len` for the
+longest prompt **plus** the longest answer.
 
 ---
 
@@ -381,9 +463,12 @@ This is why GQA, FP8 KV cache and weight quantization all raise the concurrency 
 | Instance groups | task 3 |
 | TensorRT engines (portability, optimization profiles, ORT accelerator) | task 4 |
 | Model control | task 6 |
-| TensorRT-LLM (engine settings, KV cache, weight-only quantization) | task 8, calculation 6 |
+| TensorRT-LLM, vLLM, LLM serving parameters (KV cache, batching, prefill, context, sampling) | task 8, calculations 6–19 |
 | Triton ports, Triton protocol | task 1 |
-| Serving LLMs with Triton, streaming | tasks 8, 9 |
+| Serving LLMs with Triton, streaming | tasks 8, 9, calculations 16, 17, 19 |
+| LLM serving memory, KV cache sizing | calculations 6–10, 13 |
+| Chunked prefill, LLM serving limits | calculations 11, 13, 19 |
+| Sampling defaults | calculation 18 |
 | Ensembles | task 5 |
 | Model Analyzer | task 7, calculation 3 |
 | Model warm-up, stateful models | task 6 (stateful models: sequence batcher, README exam traps) |

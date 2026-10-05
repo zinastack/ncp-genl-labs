@@ -11,7 +11,7 @@ mostly hands-on **tasks** on a GPU instance:
 |---|---|---|
 | **Tasks 1–9** | GPU instance, Docker | Triton (batching, instances, backends, ensembles, versions, Model Analyzer), TensorRT, TensorRT-LLM, NIM |
 | **Tasks K1–K6** | same instance, Kubernetes (k3s) | GPU scheduling, probes, time-slicing, autoscaling on queue time, rolling updates, canary |
-| **Calculations** | laptop | `exercises.py`: the numbers behind the tasks (batching, Little's law, rollout bounds, KV cache) |
+| **Calculations** | laptop | `exercises.py`: Part A, the arithmetic behind the Triton/Kubernetes tasks; Part B, one LLM serving scenario from `config.json` to four server configs (task 8 deploys it) |
 
 Every task follows the same loop: **scenario → change a real file or flag → run one `make` command →
 record what you see → answer the questions**. [`SOLUTION.md`](SOLUTION.md) has the expected results and
@@ -195,28 +195,60 @@ Triton again). Read `results/model_analyzer/reports/summaries/distilbert_onnx/` 
 of `distilbert_onnx`? Why must the constraint be set **before** picking the winner? (Calculation 3,
 `pick_best_config`, does the same selection.)
 
-## Task 8 — TensorRT-LLM: in-flight batching, KV cache, engines, quantization
+## Task 8 — One LLM, four servers: from config.json to measured TTFT
 
-**Scenario.** *"A chat service on one L4: users complain about the wait before the first word (TTFT)
-at peak, and finance wants more tokens per GPU. Which TensorRT-LLM settings?"*
+**Scenario.** *"A chat assistant on one L4: prompts up to 2,048 tokens, answers up to 512, 64 concurrent
+users. Size the server, configure it on TensorRT-LLM and on vLLM, directly and behind Triton, and explain
+every number in the config."* This task deploys the plan **you** compute in Part B of `exercises.py`
+(calculations 6–19; do them first, `make test-07`).
 
-`make triton-down` first (free the GPU memory). Server on `:8010`, model `Qwen/Qwen2.5-1.5B-Instruct`:
+| Server | Image (same versions as inside Triton 25.08) | Config files `make llm-plan` writes |
+|---|---|---|
+| `trtllm` | `tensorrt-llm/release:0.21.0` → `trtllm-serve` | `serve.args` (flags) + `extra.yml` (`--extra_llm_api_options`) |
+| `vllm` | `vllm/vllm-openai:v0.9.2` | `vllm.args` (engine flags) |
+| `triton-vllm` | `tritonserver:25.08-vllm-python-py3` | `repo/llm/config.pbtxt` + `repo/llm/1/model.json` |
+| `triton-trtllm` | `tritonserver:25.08-trtllm-python-py3` (LLM API backend) | `repo/llm/config.pbtxt` + `repo/llm/1/model.yaml` |
 
-1. Baseline (PyTorch backend): `make trtllm-up`, then `make trtllm-logs` and find the KV-cache size
-   (tokens) it allocated. Compare with calculation 6, `kv_cache_tokens`.
-2. In-flight batching: `make trtllm-bench CONC=1`, `CONC=8`, `CONC=32`. How do TTFT, TPOT and output
-   tokens/s move as concurrency grows?
-3. `make trtllm-up MBS=4`, `make trtllm-bench CONC=32`: what happens to TTFT and throughput?
-4. `make trtllm-up KV=0.05`, `make trtllm-bench CONC=32`: what limits the batch now?
-5. `make trtllm-up MNT=1024`, `make trtllm-bench CONC=32`: what does `max_num_tokens` limit per iteration?
-6. Engine path: `make trtllm-up BACKEND=tensorrt` (watch the engine build in `make trtllm-logs`), bench at `CONC=32`.
-   Then `make trtllm-up BACKEND=tensorrt EXTRA=int8_weight_only.yml`, bench again, and compare
-   `nvidia-smi` memory.
-7. `make trtllm-report`, then `make trtllm-down`.
+All four serve **Qwen2.5-1.5B-Instruct** on `:8010`, one at a time (`llm-serve` stops the Compose Triton
+to free the GPU; `make triton-up` brings it back). Images total ~60 GB: check `df -h /` and remove the
+previous server's image when space runs low (`docker rmi <image>`).
 
-**Answer.** Why does TTFT grow with concurrency while TPOT stays nearly flat (until it doesn't)? Which
-settings are baked into a TensorRT engine at build time and which can change at serve time? Why does INT8
-weight-only quantization speed up decoding even though the math is still FP16?
+1. **Plan and predict.** `USE_EXERCISES=1 make llm-plan ENGINE=vllm`. Read the output and
+   `results/llm/vllm/plan.json`: weights, KV cache GiB, KV tokens, sequences, `max_batch_size`,
+   `max_num_tokens`, predicted TTFT and decode step. Open the rendered `vllm.args`.
+2. **Serve and check the memory prediction.** `make llm-serve ENGINE=vllm`. The last lines print vLLM's own
+   KV-cache size (`# GPU blocks` × block size, or "KV cache size … tokens"). Within ~10% of your
+   `kv_tokens`? `make llm-metrics` shows `vllm:gpu_cache_usage_perc`, running and waiting requests.
+3. **Measure vs predict.** `make llm-bench ENGINE=vllm` (concurrency 1, 8, 32; 512-token prompts, 128-token
+   answers). Compare TTFT with the predicted prefill and TPOT with the predicted decode step.
+4. **TensorRT-LLM, same plan.** `make llm-plan ENGINE=trtllm`, `make llm-serve ENGINE=trtllm`,
+   `make llm-bench ENGINE=trtllm`. Same `FRACTION=0.9`: is the KV cache bigger or smaller than vLLM's, and
+   why (calculation 9)?
+5. **Behind Triton.** `make llm-plan ENGINE=triton-vllm`, serve, bench; then `ENGINE=triton-trtllm`. Read the
+   generated `config.pbtxt` and `model.json` / `model.yaml`. Send one request by hand:
+   ```bash
+   curl -s localhost:8010/v2/models/llm/generate -d '{"text_input": "What is a KV cache?", "parameters": {"max_tokens": 64, "temperature": 0}}'   # triton-vllm
+   ```
+   Is the Triton-wrapped server slower than the direct one? Where would the difference come from?
+6. **Turn the knobs** (re-plan → serve → bench each time, then `make llm-report`):
+
+   | Change | Command | Watch |
+   |---|---|---|
+   | Context size | `make llm-plan ENGINE=vllm PROMPT=8192 OUTPUT=1024` | sequences that fit, `max_batch_size`, warnings |
+   | Starve the KV cache | `FRACTION=0.3` (vLLM), bench `CONC=64 PTOK=2000 OTOK=512` | ~107k KV tokens < 64 × 2,512: waiting requests in `llm-metrics`, TTFT p95 |
+   | FP8 KV cache | `KVBITS=8` (vLLM) | KV tokens ×2 in the log; TPOT at `CONC=32` |
+   | Small token budget | `CHUNK=256` (→ `max_num_tokens` 512), bench `PTOK=2000` | TTFT: each prompt needs several iterations to prefill (calculation 11) |
+   | Fewer sequences | `USERS=4`, bench with `CONC=32` | queueing: TTFT p95 explodes, TPOT stays low |
+   | FP8 weights (vLLM) | `make llm-serve ENGINE=vllm VLLM_EXTRA="--quantization fp8"` | weights GiB in the log, KV cache, TPOT |
+   | A bigger model | `MODEL_ID=Qwen/Qwen2.5-7B-Instruct` | does it fit? how many sequences? |
+
+7. `make llm-stop`, then `make triton-up` for the next tasks.
+
+**Answer.** Why does the same `0.9` give different KV caches on vLLM and TensorRT-LLM? Why does TTFT grow
+with concurrency while TPOT stays nearly flat, until the KV cache or the token budget runs out? Which
+parameters live in the server config (sizes, memory, scheduling) and which in each request (sampling,
+`max_tokens`)? Why is Triton's `max_batch_size` 0 in `model.yaml` while the engine's is 64? What do
+`decoupled: True` and `KIND_MODEL` do?
 
 ## Task 9 — NIM: the packaged path
 
@@ -224,7 +256,7 @@ weight-only quantization speed up decoding even though the math is still FP16?
 NVIDIA-optimised engines, and no engine builds to maintain."*
 
 You need a free NGC API key (ngc.nvidia.com → Setup → Generate API Key, and accept the model's terms in
-the NGC catalog): `export NGC_API_KEY=...`. Stop other GPU servers first (`make trtllm-down`).
+the NGC catalog): `export NGC_API_KEY=...`. Stop other GPU servers first (`make llm-stop`).
 
 1. `make nim-profiles`: which profiles exist (backend, precision, tensor parallelism, throughput vs latency)
    and which are compatible with an L4?
@@ -310,7 +342,9 @@ Canary vs blue-green vs shadow: which needs twice the GPUs?
 
 ## Calculations (`exercises.py`, laptop)
 
-`make test-07` from the repo root. Each one is the arithmetic behind a task:
+`make test-07` from the repo root.
+
+**Part A — Triton and Kubernetes arithmetic**
 
 | # | Function | Used in |
 |---|---|---|
@@ -319,7 +353,25 @@ Canary vs blue-green vs shadow: which needs twice the GPUs?
 | 3 | `pick_best_config` | task 7: Model Analyzer's selection rule |
 | 4 | `rollout_bounds` | K5: maxSurge / maxUnavailable with scarce GPUs |
 | 5 | `rerank_top_n` | RAG serving: recall first, then a reranker for precision |
-| 6 | `kv_cache_tokens` | task 8: how many tokens the KV cache holds |
+
+**Part B — serving one LLM (task 8 deploys what you compute here)**
+
+| # | Function | What it teaches |
+|---|---|---|
+| 6 | `model_spec` | reading `config.json`: layers, heads, **KV heads (GQA)**, head_dim, tied embeddings → parameters |
+| 7 | `weight_gib` | weight memory at 16/8/4 bits |
+| 8 | `kv_bytes_per_token` | the KV-cache formula, and why GQA and FP8 KV shrink it |
+| 9 | `kv_cache_gib` | TensorRT-LLM `kv_cache_free_gpu_memory_fraction` vs vLLM `gpu_memory_utilization` |
+| 10 | `max_sequences` | paged KV cache: blocks per sequence, sequences that fit |
+| 11 | `prefill_iterations` | `max_num_tokens` / `max_num_batched_tokens` and **chunked prefill** |
+| 12 | `estimate_latency` | prefill is compute-bound (TTFT), decode is memory-bound (TPOT) |
+| 13 | `plan_llm_server` | `max_seq_len`, `max_batch_size`, `max_num_tokens` for an SLO and a user count |
+| 14 | `render_trtllm_serve` | `trtllm-serve` flags + `--extra_llm_api_options` |
+| 15 | `render_vllm_args` | vLLM engine flags |
+| 16 | `render_triton_vllm` | Triton vLLM backend: `config.pbtxt` + `model.json` |
+| 17 | `render_triton_trtllm` | Triton TensorRT-LLM (LLM API) backend: `model.yaml`, `triton_config` |
+| 18 | `effective_sampling` | `generation_config.json` defaults vs request parameters, greedy decoding |
+| 19 | `generate_request` | the same request in OpenAI, Triton-vLLM and Triton-TensorRT-LLM form |
 
 ## Exam traps
 

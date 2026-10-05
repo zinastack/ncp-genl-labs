@@ -812,3 +812,135 @@ The server process is still healthy, so liveness passes and nothing restarts. Wi
 a model that is not loaded makes readiness fail, so the pod stops receiving traffic until the model
 is loaded again. This is exactly why readiness and liveness are separate probes.
 """
+
+[[questions]]
+id = "07-41"
+topic = "LLM serving memory"
+question = """
+A 3 GB model is served on a 24 GB GPU twice: once with vLLM --gpu-memory-utilization 0.5, once with
+TensorRT-LLM kv_cache_free_gpu_memory_fraction 0.5. Which server gets the larger KV cache, and why?
+"""
+options = [
+  "TensorRT-LLM: its fraction applies to the memory left after loading the weights, while vLLM's caps the total memory used for weights, activations and cache",
+  "vLLM: its fraction applies only to the KV cache, while TensorRT-LLM's includes the weights",
+  "They are identical, because both parameters mean the share of GPU memory given to the KV cache",
+  "Neither: both servers ignore the fraction when the model is smaller than 8 GB",
+]
+answer = ["A"]
+explanation = """
+vLLM's gpu_memory_utilization is the share of total GPU memory the whole executor may use, so the cache is
+roughly 0.5 × 24 minus the weights and activation memory (about 8 GB here). TensorRT-LLM's
+free_gpu_memory_fraction is applied to the memory still free after weights and buffers, about
+0.5 × 20 = 10 GB here. The same number therefore yields different caches, which matters when you port
+settings between servers.
+"""
+
+[[questions]]
+id = "07-42"
+topic = "Chunked prefill"
+question = """
+Users of an LLM chat service report that whenever someone submits a very long document, every other
+user's stream stalls for a moment. Decode speed is otherwise fine. Which change addresses this directly?
+"""
+options = [
+  "Enable chunked prefill and keep the per-iteration token budget (max_num_tokens / max_num_batched_tokens) moderate, so long prompts are prefilled in pieces between decode steps",
+  "Raise max_model_len so long documents are accepted",
+  "Increase temperature so generation finishes sooner",
+  "Disable the paged KV cache",
+]
+answer = ["A"]
+explanation = """
+Without chunking, a long prompt is prefilled in one large iteration, and every running sequence waits
+for it before its next token. Chunked prefill splits the prompt over several iterations that also carry
+the decode tokens, smoothing inter-token latency. A larger max_model_len only admits longer prompts,
+sampling settings do not change compute, and paging is what makes efficient batching possible.
+"""
+
+[[questions]]
+id = "07-43"
+topic = "LLM serving limits"
+question = """
+A vLLM server runs with --max-model-len 4096. A client sends a 3,900-token prompt with max_tokens 512
+and gets a 400 error. What is the correct fix if answers of up to 512 tokens are required?
+"""
+options = [
+  "Restart the server with max_model_len of at least 4,412 (prompt plus answer), if the model's context and the KV cache allow it",
+  "Lower the temperature to 0",
+  "Raise max_num_seqs",
+  "Set gpu_memory_utilization to 1.0",
+]
+answer = ["A"]
+explanation = """
+max_model_len bounds prompt tokens plus generated tokens for one sequence, so 3,900 + 512 exceeds 4,096
+and the request is rejected up front. Size it for the longest prompt plus the longest answer, within the
+model's max_position_embeddings. Sampling, the number of sequences and the memory fraction do not change
+the per-sequence length limit.
+"""
+
+[[questions]]
+id = "07-44"
+topic = "KV cache sizing"
+question = """
+Two models have the same number of layers and the same hidden size. Model A uses multi-head attention
+with 32 KV heads; model B uses grouped-query attention with 8 KV heads. Both use head_dim 128. How does
+this affect serving on the same GPU?
+"""
+options = [
+  "Model B needs 4× less KV-cache memory per token, so about 4× more tokens fit in the same cache and more sequences can run concurrently",
+  "Model B needs 4× more KV-cache memory because each KV head serves more query heads",
+  "There is no difference: KV-cache size depends only on the number of layers",
+  "Model B cannot use a paged KV cache",
+]
+answer = ["A"]
+explanation = """
+KV bytes per token = 2 × layers × KV heads × head_dim × bytes. Going from 32 to 8 KV heads divides it by
+four, so the same cache holds four times the tokens and long contexts or large batches become affordable.
+The query heads that share each KV head do not add cache. GQA models are served with paged KV caches like
+any other model.
+"""
+
+[[questions]]
+id = "07-45"
+topic = "Sampling defaults"
+question = """
+The same prompt with no sampling parameters returns different styles of answer from a vLLM server and from
+a custom server that only applies OpenAI defaults (temperature 1.0, top_p 1.0). The model's
+generation_config.json sets temperature 0.7, top_p 0.8, top_k 20. What explains it?
+"""
+options = [
+  "vLLM applies the model's generation_config.json as default sampling parameters (--generation-config auto), while the custom server uses its own defaults",
+  "vLLM always runs greedy decoding when no parameters are given",
+  "The custom server uses a different tokenizer automatically",
+  "generation_config.json is only used during training",
+]
+answer = ["A"]
+explanation = """
+Request parameters override defaults, but when a request is silent the server's default policy decides.
+vLLM loads generation_config.json by default, so the model publisher's temperature, top_p and top_k
+apply. A server that ignores the file samples at temperature 1.0 with no filtering. Setting the
+parameters explicitly in every request, or temperature 0 for deterministic output, removes the
+difference.
+"""
+
+[[questions]]
+id = "07-46"
+topic = "Serving LLMs with Triton"
+question = """
+In a Triton model repository for an LLM served by the vLLM or TensorRT-LLM backend, which settings are
+correct? (Select TWO)
+"""
+options = [
+  "Triton's own dynamic batching stays off (max_batch_size 0 for the TensorRT-LLM LLM-API backend): the engine performs in-flight batching itself",
+  "The model is decoupled so that one request can return many responses, which token streaming requires",
+  "max_queue_delay_microseconds should be set high so Triton forms large batches before the engine",
+  "instance_group count should equal the expected number of concurrent users",
+  "Streaming works only over the KServe v2 /infer endpoint, not generate_stream",
+]
+answer = ["A", "B"]
+explanation = """
+LLM engines schedule tokens every iteration, so Triton's request-level dynamic batcher would only add
+delay; the engine's max_batch_size controls concurrency instead. Streaming sends many responses for one
+request, which needs a decoupled model and the generate_stream endpoint (or gRPC streaming). One
+instance serves many concurrent users through in-flight batching; more instances would duplicate the
+weights on the GPU.
+"""

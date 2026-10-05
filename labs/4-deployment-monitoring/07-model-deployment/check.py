@@ -74,11 +74,14 @@ def main() -> None:
     checks.append(("6 Versions + model control", len(versions) >= 2,
                    f"distilbert_onnx versions READY: {sorted(versions) or 'none'}; need 2 (version_policy all)"))
     checks.append(("7 Model Analyzer", (RESULTS / "model_analyzer" / "reports").exists(), "make s4-ma-07"))
-    trtllm = set()
-    for p in (RESULTS / "trtllm").glob("*.json") if (RESULTS / "trtllm").exists() else []:
-        r = json.loads(p.read_text())
-        trtllm.add(tuple(r.get(k) for k in ("engine", "mbs", "mnt", "kv", "extra")))
-    checks.append(("8 TensorRT-LLM", len(trtllm) >= 3, f"{len(trtllm)} distinct server settings benchmarked; need ≥ 3"))
+    engines: dict[str, set[str]] = {}
+    if (RESULTS / "llm" / "bench.csv").exists():
+        with (RESULTS / "llm" / "bench.csv").open() as f:
+            for r in csv.DictReader(f):
+                engines.setdefault(r["engine"], set()).add(r["settings"])
+    settings = sum(len(v) for v in engines.values())
+    checks.append(("8 One LLM, four servers", len(engines) >= 3 and settings >= 5,
+                   f"benchmarked {len(engines)} engines, {settings} configs; need ≥ 3 engines and ≥ 5 configs (make s4-llm-bench)"))
     nim = list((RESULTS / "nim").glob("*/")) if (RESULTS / "nim").exists() else []
     checks.append(("9 NIM", bool(nim), "make s4-nim-up, then make s4-nim-bench"))
 

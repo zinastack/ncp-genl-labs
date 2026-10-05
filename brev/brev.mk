@@ -23,9 +23,9 @@ BREV_TYPES_4 := g2-standard-8:nvidia-l4:1,g6.2xlarge,g2-standard-4:nvidia-l4:1
 BREV_TYPES_5 := $(BREV_TYPES_1)
 TYPE      ?= $(BREV_TYPES_$(S))
 # Disk in GB. --min-disk sets the size on types with adjustable disks (GCP/AWS: 10 GB-16 TB) and
-# skips fixed-disk types that are smaller. Section 4 holds ~150 GB of container images.
+# skips fixed-disk types that are smaller. Section 4 holds ~200 GB of container images.
 # Copy/exec go through Brev's SSH relay (not --host): a VM's public port 22 is often closed.
-DISK_4    := 200
+DISK_4    := 300
 DISK      ?= $(or $(DISK_$(S)),100)
 
 BREV_TARBALL := $(CURDIR)/.brev-genl-labs.tgz
